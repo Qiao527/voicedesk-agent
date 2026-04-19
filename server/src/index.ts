@@ -21,6 +21,8 @@ app.use(
   })
 );
 
+app.get("/ping", (_req, res) => res.json({ status: "ok" }));
+
 app.use("/webhooks/vapi", verifyVapiSignature, vapiWebhookRouter);
 app.use("/api", apiRouter);
 
