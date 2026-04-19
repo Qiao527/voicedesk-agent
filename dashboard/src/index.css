@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "SFMono-Regular", "SF Mono", Menlo, monospace;
+
+  /* Brand palette */
+  --color-purple: #533afd;
+  --color-purple-hover: #4434d4;
+  --color-purple-deep: #2e2b8c;
+  --color-purple-light: #b9b9f9;
+  --color-purple-surface: #f0effe;
+
+  --color-navy: #061b31;
+  --color-navy-dark: #0d253d;
+  --color-brand-dark: #1c1e54;
+
+  --color-ruby: #ea2261;
+  --color-magenta: #f96bee;
+
+  --color-heading: #061b31;
+  --color-label: #273951;
+  --color-body: #64748d;
+  --color-muted: #94a3b8;
+
+  --color-success: #15be53;
+  --color-success-text: #108c3d;
+  --color-warning: #9b6829;
+
+  --color-border: #e5edf5;
+  --color-surface: #f8fafc;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface);
+  color: var(--color-heading);
+  font-feature-settings: "ss01" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Layered shadows */
+.shadow-elevated {
+  box-shadow: 0 2px 5px 0 rgba(50, 50, 93, 0.1),
+              0 1px 2px 0 rgba(0, 0, 0, 0.07);
+}
+
+.shadow-elevated-md {
+  box-shadow: 0 6px 12px -2px rgba(50, 50, 93, 0.25),
+              0 3px 7px -3px rgba(0, 0, 0, 0.1);
+}
+
+.shadow-elevated-lg {
+  box-shadow: 0 13px 27px -5px rgba(50, 50, 93, 0.25),
+              0 8px 16px -8px rgba(0, 0, 0, 0.1);
+}
