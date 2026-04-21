@@ -1,23 +1,28 @@
 # Next Steps
 
-Last updated: April 16, 2026 (audit round complete)
+Last updated: April 20, 2026 (post first live deployment)
 
-## Highest Priority
+## Highest Priority (unblock first paying client)
 
-1. Run one end-to-end dry run with real Google, Supabase, Vapi, and Twilio credentials using one seeded business and a real test call. Confirm: recording disclosure is spoken before the greeting, a live transfer forwards to the owner's phone, Vapi's `endedReason` maps to `transferred`, and the webhook signature check passes with `VAPI_WEBHOOK_SECRET` set.
-2. Apply `server/supabase/migrations/002_idempotency_rls_consent.sql` to the production Supabase project and verify the existing `calls` / `appointments` tables survive the new unique indexes (fail fast on any pre-existing duplicates).
-3. Decide on the path to external paid onboarding — the strategic blockers in "After That" are all prerequisites for a stranger being able to swipe a card and go live.
+1. **Fix SMS notifications** — either complete Twilio A2P 10DLC registration (1-2 weeks), buy a toll-free number ($2/mo, faster verification), or upgrade from trial account. Without SMS the owner misses call summaries.
+2. **Verify Google Calendar booking end-to-end** — connect a real Google account via the dashboard Settings, then make a test call that books an appointment. Confirm the event appears in Google Calendar.
+3. **Re-enable webhook signature verification** — generate a shared secret, set it as `VAPI_WEBHOOK_SECRET` in Railway and as the webhook secret in the Vapi dashboard. Verify with a test call.
+4. **Clean up legacy test data** — remove the 7 old test business records from Supabase that aren't Boston Dental Demo.
 
-## After That (strategic blockers to paid self-serve)
+## After That (product hardening)
 
-1. Self-serve signup + Stripe billing (currently the setup CLI is the only path to create a business).
+1. Encrypt Google refresh tokens at rest (currently plaintext JSONB in `businesses` table).
+2. Implement sentiment analysis — derive from transcript via Claude post-call, populate `sentiment` field.
+3. Rate limiting on dashboard API + webhook endpoints.
+4. Email notifications via Resend as SMS fallback.
+5. Demo preparation — record a sample call, prepare one-page sales sheet for client pitches.
+
+## Strategic Blockers (paid self-serve)
+
+1. Self-serve signup + Stripe billing (currently only CLI onboarding).
 2. Multi-business-per-user and multi-user-per-business (current model is 1:1 via `owner_user_id`).
-3. HIPAA posture decision — we already record and transcribe calls, which is a problem for any clinic that wants a BAA. Either avoid healthcare pre-BAA or negotiate BAAs with Vapi / Supabase / Deepgram / Anthropic / Twilio.
-4. Public-facing privacy policy, ToS, and DPA; data retention policy + deletion endpoint (GDPR / CCPA).
-5. Rate limiting and abuse controls on dashboard API + webhook.
-6. Encrypt Google refresh tokens at rest (currently stored as plaintext JSONB; service_role has them in the clear).
-7. Reconcile call outcome naming and analytics fields across schema, server, and dashboard; populate `sentiment`.
-8. Onboarding runbooks + 10-minute first-client setup flow.
+3. HIPAA posture decision — recording and transcribing calls is a problem for clinics that need a BAA.
+4. Public-facing privacy policy, ToS, DPA; data retention + deletion endpoint (GDPR/CCPA).
 
 ## Definition Of Useful Progress
 

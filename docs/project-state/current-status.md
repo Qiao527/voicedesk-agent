@@ -1,52 +1,46 @@
 # Current Status
 
-Last updated: April 16, 2026 (audit round complete)
+Last updated: April 20, 2026 (first live deployment + end-to-end call verified)
 
-## What Exists
+## What Exists and Is Verified Live
 
-- A server-side MVP path for inbound calls:
-  - Vapi webhook endpoint
-  - per-business assistant configuration
-  - tool handlers for availability, booking, messages, and transfer intent
-  - post-call logging into Supabase
-  - owner SMS notification path
-- A dashboard MVP:
-  - Supabase-auth shell
-  - call log page
-  - settings page
-  - analytics page
-- A business onboarding CLI in `server/src/scripts/setup-business.ts`
-- Environment examples for server and dashboard
-- Google Calendar OAuth start/callback routes with per-business token persistence in the `businesses` table
-- A dashboard settings entry point for connecting Google Calendar
+- **Server deployed on Railway**: `your-server.example.com` (Node.js 20, healthcheck passing, Supabase connected)
+- **Dashboard deployed on Vercel**: `your-dashboard.example.com` (Vite/React, connected to server API)
+- **End-to-end call flow verified**:
+  - Vapi inbound call → webhook → Claude assistant-request → dynamic per-business config
+  - Recording disclosure spoken before greeting ✅
+  - FAQ answered correctly from business knowledge base ✅
+  - Live call transfer to owner phone via Vapi transferCall ✅
+  - End-of-call-report logged to Supabase (transcript, summary, cost, outcome) ✅
+  - Recording URL persisted ✅
+  - Dashboard displays call records ✅
+- **Test business "Boston Dental Demo"** is live on `+1 (617) 555-0100` with 5 FAQ items
+- Google Calendar OAuth routes in place (not yet verified with real credentials end-to-end)
+- Business onboarding CLI in `server/src/scripts/setup-business.ts`
+- Migration 002 applied to production Supabase (RLS, recording consent, idempotency)
 
-## What Has Been Verified Locally
+## What Was Fixed During Deployment
 
-- `cd server && npm run build` passes
-- `cd dashboard && npm run build` passes
-
-This confirms the repo builds locally, but it does not confirm live end-to-end behavior with external services.
+- Railway defaulted to Node.js 18 → pinned to Node.js 20 via `nixpacks.toml`
+- `VAPI_WEBHOOK_SECRET` signature verification blocked all webhooks → removed for now, re-enable after configuring matching secret in Vapi
+- Vapi phone number webhook URL pointed to old domain → updated to `your-server.example.com`
+- Migration 002 partial unique index (`WHERE vapi_call_id IS NOT NULL`) not recognized by PostgREST upsert → replaced with proper `ALTER TABLE calls ADD CONSTRAINT calls_vapi_call_id_unique UNIQUE (vapi_call_id)`
 
 ## Known Gaps
 
-- Google Calendar OAuth wiring is now in place, but it still needs a real credential-backed dry run to confirm booking works end to end
-- Dashboard data routes are scoped via `requireAuth` + `req.auth.businessId`; the Google OAuth start route is now authenticated and its `state` parameter is HMAC-signed, so the "connect any business" bypass is closed
-- `transfer_to_human` uses Vapi's built-in `transferCall` (a real live forward, not just spoken language); destinations are normalized to E.164, the tool and system prompt are gated on availability, and Vapi's actual transfer end reasons feed the "transferred" outcome. Still needs a live dry run against real Vapi + Twilio to confirm end-to-end.
-- Dashboard API write-paths are Zod-validated: `PATCH /business`, `POST /faqs`, and every `:id` path param. Validation errors return a readable 400 and surface in the Settings toast.
-- Vapi webhook signature verification now hashes the exact raw request bytes captured by `express.json({ verify })`, so enabling `VAPI_WEBHOOK_SECRET` in production no longer 401s legitimate webhooks
-- `check_availability` now respects each business's stored `business_hours` (open/close per weekday) and returns "closed today" instead of advertising 9–5 slots universally
-- Booking is idempotent in both layers: unique index `(_vapi_call_id, start_time)` on `appointments` and a pre-insert lookup in the handler; call-log insert is now an upsert keyed by `vapi_call_id` so Vapi retries don't 409
-- Call recording disclosure is configurable per business and is spoken before the greeting (two-party-consent states covered by default); owners can edit it in Settings
-- RLS is enabled on all five tables with owner-scoped policies (defense in depth; server keeps using service_role)
-- Call cost in cents is persisted from the Vapi `cost` field on end-of-call-report
-- Phone numbers are masked in server logs (last-4 only) to reduce PII footprint
-- `/health` now actually pings Supabase, so uptime monitors catch a broken service_role key
-- Analytics appointment count excludes `status='cancelled'`
-- Outcome/sentiment tracking on calls is still partially populated; sentiment in particular is not derived anywhere yet
+- **SMS notifications not working**: Twilio trial account requires A2P 10DLC registration for US local numbers. Options: complete A2P registration (1-2 weeks), buy a toll-free number, or upgrade Twilio account
+- **Google Calendar booking not verified live**: OAuth routes exist but no real credential-backed dry run yet
+- **Webhook signature verification disabled**: `VAPI_WEBHOOK_SECRET` removed to unblock deployment; re-enable after matching secret is configured on both sides
+- **Sentiment analysis not implemented**: `sentiment` field on calls is never populated
+- **Google refresh tokens stored as plaintext JSONB**
+- **No self-serve signup / Stripe billing**: only CLI onboarding path exists
+- **Outcome/sentiment fields partially populated**: outcome derives from appointments/messages/transfer; sentiment is not derived anywhere
+- **Email notifications (Resend) not tested live**
+- **Old test business records in Supabase**: 7 legacy business rows from earlier testing still present
 
 ## Practical Maturity
 
-The repo is past brainstorming and past pure scaffolding. It is best described as an MVP prototype with real core paths implemented, but still needing integration hardening before first-customer trust.
+The system is deployed and handling real inbound calls end-to-end. The core voice path (greet → FAQ → transfer) works in production. Booking and message-taking work at the code level but need live calendar credentials to fully verify. SMS notifications are blocked by Twilio registration.
 
 ## Working Assumption
 
