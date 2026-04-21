@@ -324,12 +324,9 @@ Timezone: ${timezone}${hoursBlock}${faqBlock}`;
       tools: builtinTools,
     },
     voice: {
-      provider: business.voice_provider || "11labs",
-      voiceId: business.voice_id || "paula",
+      provider: "playht",
+      voiceId: "jennifer",
     },
-    // Legal compliance: two-party-consent states (CA, FL, IL, MD, MA, MT, NV,
-    // NH, PA, WA) require callers be notified before recording. We prepend
-    // the disclosure to the greeting so Vapi speaks it before the AI turn.
     firstMessage: [
       business.recording_disclosure,
       business.greeting_message ||
@@ -340,8 +337,8 @@ Timezone: ${timezone}${hoursBlock}${faqBlock}`;
     endCallMessage: "Thank you for calling. Have a great day!",
     transcriber: {
       provider: "deepgram",
-      model: "nova-2",
-      language: "en",
+      model: "nova-3",
+      language: "en-US",
     },
     recordingEnabled: true,
     endCallFunctionEnabled: true,
@@ -371,13 +368,13 @@ function buildDefaultAssistant() {
       ],
       functions: TOOL_DEFINITIONS.filter((t) => t.name !== "transfer_to_human"),
     },
-    voice: { provider: "11labs", voiceId: "paula" },
+    voice: { provider: "playht", voiceId: "jennifer" },
     firstMessage: "Hello! Thanks for calling. How can I help you today?",
     endCallMessage: "Thank you for calling. Have a great day!",
     transcriber: {
       provider: "deepgram",
-      model: "nova-2",
-      language: "en",
+      model: "nova-3",
+      language: "en-US",
     },
     recordingEnabled: true,
     endCallFunctionEnabled: true,
