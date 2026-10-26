@@ -1,35 +1,14 @@
-import crypto from "crypto";
-import { env } from "../config/env";
+import crypto from "node:crypto";
 
 /**
- * Signed state tokens for OAuth `state` parameters.
+ * Signed, short-lived OAuth `state` tokens.
  *
- * The callback is hit by Google directly and can't carry a Supabase bearer
- * token, so we can't use `requireAuth` there. Instead, the authenticated
- * start route mints a short-lived HMAC-signed token carrying the businessId
- * and the initiating userId. The callback verifies the signature and TTL
- * before writing tokens to any business row, which prevents an attacker from
- * initiating OAuth against a business they don't own.
+ * Google redirects the browser to our callback without a Supabase session, so
+ * the callback can't use `requireAuth`. The authenticated start route mints a
+ * token binding the business and user; the callback only writes tokens for a
+ * business if the HMAC and TTL check out. This blocks OAuth CSRF and stops a
+ * user from attaching their calendar to someone else's business.
  */
-
-const STATE_TTL_SECONDS = 10 * 60;
-
-function secret(): string {
-  return env.OAUTH_STATE_SECRET || env.SUPABASE_SERVICE_KEY;
-}
-
-function b64url(buf: Buffer): string {
-  return buf
-    .toString("base64")
-    .replace(/=+$/, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-}
-
-function b64urlDecode(s: string): Buffer {
-  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
-  return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/") + pad, "base64");
-}
 
 export interface OAuthStatePayload {
   bid: string;
@@ -38,53 +17,55 @@ export interface OAuthStatePayload {
   n: string;
 }
 
-export function signOAuthState(data: {
-  businessId: string;
-  userId: string;
-}): string {
-  const payload: OAuthStatePayload = {
-    bid: data.businessId,
-    uid: data.userId,
-    iat: Math.floor(Date.now() / 1000),
-    n: crypto.randomBytes(16).toString("hex"),
+const b64url = (buf: Buffer) => buf.toString("base64url");
+
+export function createOAuthStateSigner(secret: string, options: { ttlSeconds?: number } = {}) {
+  const ttl = options.ttlSeconds ?? 10 * 60;
+  const sign = (payloadPart: string) =>
+    b64url(crypto.createHmac("sha256", secret).update(payloadPart).digest());
+
+  return {
+    sign(data: { businessId: string; userId: string }, now = Date.now()): string {
+      const payload: OAuthStatePayload = {
+        bid: data.businessId,
+        uid: data.userId,
+        iat: Math.floor(now / 1000),
+        n: crypto.randomBytes(16).toString("hex"),
+      };
+      const payloadPart = b64url(Buffer.from(JSON.stringify(payload)));
+      return `${payloadPart}.${sign(payloadPart)}`;
+    },
+
+    verify(state: string, now = Date.now()): OAuthStatePayload | null {
+      const parts = state.split(".");
+      if (parts.length !== 2) return null;
+      const [payloadPart, sig] = parts;
+
+      const expected = Buffer.from(sign(payloadPart));
+      const provided = Buffer.from(sig);
+      if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
+        return null;
+      }
+
+      let payload: OAuthStatePayload;
+      try {
+        payload = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8"));
+      } catch {
+        return null;
+      }
+      if (
+        typeof payload?.bid !== "string" ||
+        typeof payload.uid !== "string" ||
+        typeof payload.iat !== "number"
+      ) {
+        return null;
+      }
+
+      const age = Math.floor(now / 1000) - payload.iat;
+      if (age < 0 || age > ttl) return null;
+      return payload;
+    },
   };
-  const payloadPart = b64url(Buffer.from(JSON.stringify(payload)));
-  const sig = b64url(
-    crypto.createHmac("sha256", secret()).update(payloadPart).digest(),
-  );
-  return `${payloadPart}.${sig}`;
 }
 
-export function verifyOAuthState(state: string): OAuthStatePayload | null {
-  const parts = state.split(".");
-  if (parts.length !== 2) return null;
-  const [payloadPart, sig] = parts;
-
-  const expected = b64url(
-    crypto.createHmac("sha256", secret()).update(payloadPart).digest(),
-  );
-  const provided = Buffer.from(sig);
-  const exp = Buffer.from(expected);
-  if (provided.length !== exp.length) return null;
-  if (!crypto.timingSafeEqual(provided, exp)) return null;
-
-  let payload: OAuthStatePayload;
-  try {
-    payload = JSON.parse(b64urlDecode(payloadPart).toString("utf8"));
-  } catch {
-    return null;
-  }
-
-  if (
-    typeof payload.bid !== "string" ||
-    typeof payload.uid !== "string" ||
-    typeof payload.iat !== "number"
-  ) {
-    return null;
-  }
-
-  const age = Math.floor(Date.now() / 1000) - payload.iat;
-  if (age < 0 || age > STATE_TTL_SECONDS) return null;
-
-  return payload;
-}
+export type OAuthStateSigner = ReturnType<typeof createOAuthStateSigner>;

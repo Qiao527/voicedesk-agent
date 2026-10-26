@@ -1,10 +1,6 @@
-import { Request, Response, NextFunction } from "express";
-import { supabase } from "../services/supabase";
+import type { NextFunction, Request, Response } from "express";
+import type { Repository } from "../../repositories/repository";
 
-/**
- * Attached by requireAuth so downstream handlers can scope queries to the
- * authenticated user's business.
- */
 export interface AuthContext {
   userId: string;
   userEmail: string | null;
@@ -17,89 +13,41 @@ declare module "express-serve-static-core" {
   }
 }
 
+/** Resolves a bearer token to a user. Supabase in production, a stub in tests. */
+export type VerifyAccessToken = (token: string) => Promise<{ id: string; email: string | null } | null>;
+
 /**
- * Verify a Supabase access token from the Authorization header and resolve the
- * caller's business. Rejects with 401 if the token is missing/invalid, and 403
- * if the authenticated user does not own a business.
- *
- * Business resolution order:
- *   1. businesses.owner_user_id == user.id  (preferred, explicit)
- *   2. businesses.owner_email == user.email (backfill path for older rows)
+ * Authenticate a dashboard request and scope it to the caller's business.
+ * 401 for a missing/invalid token, 403 for a valid user without a business.
  */
-export async function requireAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  const header = req.headers.authorization;
-  const token =
-    header && header.toLowerCase().startsWith("bearer ")
-      ? header.slice(7).trim()
-      : null;
-
-  if (!token) {
-    res.status(401).json({ error: "Missing authorization token" });
-    return;
-  }
-
-  const { data: userResult, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !userResult?.user) {
-    res.status(401).json({ error: "Invalid or expired token" });
-    return;
-  }
-
-  const user = userResult.user;
-
-  // Try explicit ownership link first.
-  let businessId: string | null = null;
-  {
-    const { data, error } = await supabase
-      .from("businesses")
-      .select("id")
-      .eq("owner_user_id", user.id)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (error) {
-      console.warn("[requireAuth] owner_user_id lookup failed:", error.message);
+export function createRequireAuth(deps: { verifyToken: VerifyAccessToken; repo: Repository }) {
+  return async function requireAuth(req: Request, res: Response, next: NextFunction) {
+    const header = req.get("authorization");
+    const token = header?.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : null;
+    if (!token) {
+      res.status(401).json({ error: "Missing authorization token" });
+      return;
     }
-    if (data?.id) businessId = data.id;
-  }
 
-  // Fallback: email match (for businesses seeded before owner_user_id existed).
-  if (!businessId && user.email) {
-    const { data, error } = await supabase
-      .from("businesses")
-      .select("id")
-      .ilike("owner_email", user.email)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (error) {
-      console.warn("[requireAuth] owner_email lookup failed:", error.message);
+    const user = await deps.verifyToken(token);
+    if (!user) {
+      res.status(401).json({ error: "Invalid or expired session" });
+      return;
     }
-    if (data?.id) {
-      businessId = data.id;
-      // Opportunistically backfill the explicit link so future lookups are O(1).
-      await supabase
-        .from("businesses")
-        .update({ owner_user_id: user.id })
-        .eq("id", businessId);
+
+    const businessId = await deps.repo.findBusinessIdForUser(user);
+    if (!businessId) {
+      res.status(403).json({ error: "No business is linked to this account yet" });
+      return;
     }
-  }
 
-  if (!businessId) {
-    res
-      .status(403)
-      .json({ error: "No business is associated with this account" });
-    return;
-  }
-
-  req.auth = {
-    userId: user.id,
-    userEmail: user.email ?? null,
-    businessId,
+    req.auth = { userId: user.id, userEmail: user.email, businessId };
+    next();
   };
+}
 
-  next();
+/** `req.auth` is guaranteed after `requireAuth`; this narrows the type. */
+export function auth(req: Request): AuthContext {
+  if (!req.auth) throw new Error("requireAuth middleware did not run");
+  return req.auth;
 }
