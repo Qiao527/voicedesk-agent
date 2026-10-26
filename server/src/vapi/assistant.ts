@@ -1,6 +1,6 @@
 import { normalizeE164 } from "../domain/phone";
 import { describeBusinessHours } from "../domain/time";
-import type { Business, FaqItem } from "../domain/types";
+import type { Business, CallerHistory, CallerVisit, FaqItem } from "../domain/types";
 
 export interface VoiceSettings {
   model: string;
@@ -109,10 +109,50 @@ function faqBlock(faqs: FaqItem[]): string {
   return `FAQ (answer only from this list):\n${faqs.map((f) => `Q: ${f.question}\nA: ${f.answer}`).join("\n\n")}`;
 }
 
+function describeVisit(visit: CallerVisit, tz: string): string {
+  const when = new Date(visit.start_time).toLocaleString("en-US", {
+    timeZone: tz,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return visit.reason ? `${when} (${visit.reason})` : when;
+}
+
+/**
+ * Context about a caller we recognize. Phrased so the model greets them warmly
+ * but confirms identity before divulging anything, because caller ID only
+ * identifies the line, not the person holding the phone.
+ */
+function returningCallerBlock(history: CallerHistory, tz: string): string {
+  const lines = ["Returning caller (matched by caller ID, which identifies the line, not the person):"];
+  if (history.caller_name) lines.push(`- This number usually belongs to ${history.caller_name}.`);
+  if (history.call_count > 0) {
+    lines.push(`- They have reached you ${history.call_count} time${history.call_count === 1 ? "" : "s"} before.`);
+  }
+  if (history.upcoming_appointment) {
+    lines.push(`- Upcoming appointment on file: ${describeVisit(history.upcoming_appointment, tz)}.`);
+  } else if (history.last_visit) {
+    lines.push(`- Their last appointment was ${describeVisit(history.last_visit, tz)}.`);
+  }
+  lines.push(
+    "Open warmly, as if you remember them. Before discussing any appointment or personal detail, make sure you are speaking with that person; if unsure, ask. Do not read back appointment details until they confirm who they are. If it turns out to be someone else, treat them as a new caller.",
+  );
+  return lines.join("\n");
+}
+
 /** The system prompt for a business. Exported for tests and the prompt preview. */
-export function buildSystemPrompt(business: Business, faqs: FaqItem[], now: Date): string {
+export function buildSystemPrompt(
+  business: Business,
+  faqs: FaqItem[],
+  now: Date,
+  history: CallerHistory | null = null,
+): string {
   const tz = business.timezone || "America/New_York";
   const canTransfer = Boolean(normalizeE164(business.owner_phone));
+  const memory = history ? returningCallerBlock(history, tz) : null;
 
   const today = now.toLocaleDateString("en-US", {
     timeZone: tz,
@@ -130,11 +170,14 @@ export function buildSystemPrompt(business: Business, faqs: FaqItem[], now: Date
   if (business.system_prompt_override) {
     return [
       header,
+      memory,
       business.system_prompt_override.trim(),
       `Transfers: ${transferRule}`,
       BASE_RULES,
       faqBlock(faqs),
-    ].join("\n\n");
+    ]
+      .filter(Boolean)
+      .join("\n\n");
   }
 
   const details = [
@@ -148,6 +191,7 @@ export function buildSystemPrompt(business: Business, faqs: FaqItem[], now: Date
 
   return [
     header,
+    memory,
     `You are the receptionist for ${business.name}. You answer the phone warmly and efficiently, like an experienced front-desk professional.`,
     details,
     `Your job, in order of priority:
@@ -158,12 +202,22 @@ export function buildSystemPrompt(business: Business, faqs: FaqItem[], now: Date
 5. ${transferRule}`,
     BASE_RULES,
     faqBlock(faqs),
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
-export function buildFirstMessage(business: Business): string {
-  const greeting =
-    business.greeting_message?.trim() || `Thanks for calling ${business.name}, how can I help you today?`;
+export function buildFirstMessage(business: Business, history: CallerHistory | null = null): string {
+  const firstName = history?.caller_name?.trim().split(/\s+/)[0];
+  let greeting: string;
+  if (history && firstName) {
+    greeting = `Welcome back to ${business.name}! Am I speaking with ${firstName}?`;
+  } else if (history) {
+    greeting = `Welcome back to ${business.name}! How can I help you today?`;
+  } else {
+    greeting =
+      business.greeting_message?.trim() || `Thanks for calling ${business.name}, how can I help you today?`;
+  }
   return [business.recording_disclosure?.trim(), greeting].filter(Boolean).join(" ");
 }
 
@@ -182,7 +236,13 @@ function commonSettings(voice: VoiceSettings) {
 }
 
 /** Transient assistant returned from the `assistant-request` webhook. */
-export function buildAssistant(business: Business, faqs: FaqItem[], voice: VoiceSettings, now: Date) {
+export function buildAssistant(
+  business: Business,
+  faqs: FaqItem[],
+  voice: VoiceSettings,
+  now: Date,
+  history: CallerHistory | null = null,
+) {
   const transferNumber = normalizeE164(business.owner_phone);
   const tools: object[] = [...FUNCTION_TOOLS, { type: "endCall" }];
   if (transferNumber) {
@@ -200,12 +260,12 @@ export function buildAssistant(business: Business, faqs: FaqItem[], voice: Voice
 
   return {
     name: `${business.name} receptionist`.slice(0, 40),
-    firstMessage: buildFirstMessage(business),
+    firstMessage: buildFirstMessage(business, history),
     model: {
       provider: "anthropic",
       model: voice.model,
       temperature: 0.3,
-      messages: [{ role: "system", content: buildSystemPrompt(business, faqs, now) }],
+      messages: [{ role: "system", content: buildSystemPrompt(business, faqs, now, history) }],
       tools,
     },
     metadata: { businessId: business.id },

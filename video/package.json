@@ -1,0 +1,24 @@
+{
+  "name": "voicedesk-video",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remotion source for the VoiceDesk demo video.",
+  "license": "MIT",
+  "scripts": {
+    "preview": "remotion studio",
+    "render": "remotion render VoiceDeskDemo ../docs/media/voicedesk-demo.mp4",
+    "render:gif": "remotion render VoiceDeskHighlight ../docs/media/voicedesk-demo.gif --codec=gif --every-nth-frame=2 --scale=0.5",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.538",
+    "@remotion/google-fonts": "4.0.538",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "remotion": "4.0.538"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.8",
+    "typescript": "5.8.3"
+  }
+}

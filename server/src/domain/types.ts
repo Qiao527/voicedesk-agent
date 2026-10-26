@@ -185,3 +185,28 @@ export interface Message {
 }
 
 export type MessageInsert = Omit<Message, "id" | "created_at" | "call_id" | "is_read">;
+
+/** A past or upcoming visit, as remembered for a returning caller. */
+export interface CallerVisit {
+  start_time: string;
+  reason: string | null;
+  status: AppointmentStatus;
+}
+
+/**
+ * What VoiceDesk remembers about a phone number that has reached a business
+ * before. Used to greet returning callers by name and to surface prior context
+ * in the dashboard. It is derived at read time from the existing `calls` and
+ * `appointments` rows — there is no separate memory store. `null` means the
+ * number is new to this business.
+ */
+export interface CallerHistory {
+  caller_number: string;
+  caller_name: string | null;
+  /** Earlier calls from this number held by the business right now. */
+  call_count: number;
+  last_call_at: string | null;
+  last_outcome: CallOutcome | null;
+  upcoming_appointment: CallerVisit | null;
+  last_visit: CallerVisit | null;
+}

@@ -48,9 +48,25 @@ export function createVapiRouter(deps: PipelineDeps): Router {
             res.json({ assistant: buildFallbackAssistant(deps.voice) });
             return;
           }
-          const faqs = await deps.repo.listFaqs(business.id);
-          log.info("vapi.assistant_served", { businessId: business.id, faqs: faqs.length });
-          res.json({ assistant: buildAssistant(business, faqs, deps.voice, deps.now()) });
+          const callerNumber =
+            parsed.data.customer?.number ?? parsed.data.call.customer?.number ?? null;
+          const [faqs, history] = await Promise.all([
+            deps.repo.listFaqs(business.id),
+            // Returning-caller memory is a nicety: if the lookup fails, answer
+            // the phone anyway rather than letting it take down the call.
+            callerNumber
+              ? deps.repo.getCallerHistory(business.id, callerNumber, deps.now()).catch((err) => {
+                  log.warn("vapi.caller_history_failed", serializeError(err));
+                  return null;
+                })
+              : null,
+          ]);
+          log.info("vapi.assistant_served", {
+            businessId: business.id,
+            faqs: faqs.length,
+            returningCaller: Boolean(history),
+          });
+          res.json({ assistant: buildAssistant(business, faqs, deps.voice, deps.now(), history) });
         } catch (err) {
           log.error("vapi.assistant_request_failed", serializeError(err));
           res.json({ assistant: buildFallbackAssistant(deps.voice) });

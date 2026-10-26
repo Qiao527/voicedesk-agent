@@ -17,6 +17,10 @@ takes messages, and texts the owner a summary the moment the caller hangs up.
 
 [**Live demo**](https://qiao527.github.io/voicedesk-agent/) · [Architecture](docs/architecture.md) · [Deploy](docs/deployment.md) · [Design decisions](docs/decisions)
 
+<a href="docs/media/voicedesk-demo.mp4"><img src="docs/media/voicedesk-demo.gif" alt="VoiceDesk demo: a caller books an appointment, a returning caller is recognized by name, and the owner dashboard updates" width="100%" /></a>
+
+<sub>▶ [Watch the full 30-second demo (MP4)](docs/media/voicedesk-demo.mp4) · built with [Remotion](video)</sub>
+
 <img src="docs/images/overview.png" alt="VoiceDesk dashboard overview" width="100%" />
 
 </div>
@@ -74,6 +78,11 @@ cd voicedesk-agent/server && npm ci && npm run demo:call
    [VoiceDesk] Appointment booked · Harborview Dental
    From: Jordan Lee (617) 555-0199 (2 min)
    Booked: Jordan Lee, Mon, Oct 26, 8:00 AM (Cleaning)
+7. Same caller rings back → recognized
+   AI     This call may be recorded for quality and scheduling. Welcome back to Harborview Dental! Am I speaking with Jordan?
+   Returning caller (matched by caller ID, which identifies the line, not the person):
+   - This number usually belongs to Jordan Lee.
+   - Upcoming appointment on file: Monday, October 26 at 8:00 AM (Cleaning).
 ```
 
 Set `ANTHROPIC_API_KEY` to run the post-call analysis with Claude instead of the offline heuristic.
@@ -106,8 +115,9 @@ Vapi handles the phone line, speech-to-text and text-to-speech. On each call the
 - **Idempotent under retries.** Vapi retries webhooks. Bookings are unique per call and start time, calls are upserted, and owner notifications use an atomic claim, so a retry never double-books or sends a second SMS.
 - **Time zones done properly.** Scheduling is built on `Intl` alone and tested across DST transitions, half-hour offsets (Asia/Kolkata), zones beyond UTC+12, and `24:00` closing times. Analytics bucket days in the business zone, not UTC.
 - **Grounded AI.** The voice model can only offer times returned by the availability tool, which re-validates against live free/busy before booking. The analysis model gets server-known facts as ground truth and reads transcripts as delimited untrusted data. Structured outputs guarantee a valid result.
+- **Remembers returning callers.** When a number that has called before rings again, the receptionist greets it by name and knows the caller's upcoming appointment and history — derived at read time from the existing tables, with no separate memory store. Because caller ID identifies the line and not the person, the prompt confirms identity before revealing any detail.
 - **Security by default.** Webhook auth (secret, bearer or HMAC) is required in production. Google tokens are encrypted with AES-256-GCM bound to the business id. Every dashboard query is scoped server-side to the caller's business, with RLS as a second layer. ([details](docs/architecture.md#security-model))
-- **Testable architecture.** Pure domain logic, a repository interface with Supabase and in-memory implementations, and dependency injection through `createApp()`. 105 server tests drive the real Express app; the offline demo doubles as a CI smoke test. ([ADR 3](docs/decisions/0003-repository-and-di.md))
+- **Testable architecture.** Pure domain logic, a repository interface with Supabase and in-memory implementations, and dependency injection through `createApp()`. 131 server tests drive the real Express app; the offline demo doubles as a CI smoke test. ([ADR 3](docs/decisions/0003-repository-and-di.md))
 
 ## Tech stack
 
@@ -121,6 +131,8 @@ Vapi handles the phone line, speech-to-text and text-to-speech. On each call the
 | Dashboard | React 19, React Router 7, Vite 8, Tailwind CSS 4, Recharts |
 | Quality | Vitest, Supertest, Testing Library, ESLint 9, Prettier, GitHub Actions, Dependabot |
 | Deploy | Docker, Railway (server), Vercel or GitHub Pages (dashboard) |
+
+> Why a managed voice platform (Vapi) and not a self-hosted LiveKit stack — with the cost, latency and compliance trade-offs and the point at which that flips: [ADR 6](docs/decisions/0006-voice-platform-livekit-vs-vapi.md).
 
 ## Running it for real
 
@@ -170,7 +182,7 @@ voicedesk-agent/
 ## Testing
 
 ```bash
-cd server && npm test          # 105 tests: domain, security, webhooks, API
+cd server && npm test          # 131 tests: domain, security, webhooks, API
 cd server && npm run test:coverage
 cd dashboard && npm test       # transcript parsing, formatting, demo data, components
 ```

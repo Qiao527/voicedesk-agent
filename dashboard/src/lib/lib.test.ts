@@ -82,4 +82,29 @@ describe("demo data", () => {
     const faq = await api.createFaq({ question: "Q?", answer: "A." });
     expect((await api.listFaqs()).some((f) => f.id === faq.id)).toBe(true);
   });
+
+  it("recognizes returning callers in call details", async () => {
+    const api = createDemoApi(now);
+    const calls = await api.listCalls();
+    const counts = new Map<string, number>();
+    for (const c of calls) if (c.caller_number) counts.set(c.caller_number, (counts.get(c.caller_number) ?? 0) + 1);
+
+    const repeated = calls.filter((c) => c.caller_number && counts.get(c.caller_number)! > 1);
+    expect(repeated.length).toBeGreaterThan(0);
+
+    const detail = await api.getCall(repeated[0].id);
+    expect(detail.caller_history?.call_count).toBeGreaterThan(1);
+    expect(detail.caller_history?.caller_number).toBe(repeated[0].caller_number);
+
+    // At least one returning caller has a visit on file, so the UI's
+    // appointment line is exercised in the demo.
+    const details = await Promise.all(repeated.map((c) => api.getCall(c.id)));
+    expect(
+      details.some((d) => d.caller_history?.upcoming_appointment || d.caller_history?.last_visit),
+    ).toBe(true);
+
+    // A one-off caller reports only the single call, so no "returning" badge.
+    const once = calls.find((c) => c.caller_number && counts.get(c.caller_number) === 1)!;
+    expect((await api.getCall(once.id)).caller_history?.call_count).toBe(1);
+  });
 });

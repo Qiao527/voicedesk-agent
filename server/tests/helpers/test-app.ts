@@ -77,9 +77,9 @@ export function buildTestApp(options: TestAppOptions = {}) {
     api: {
       verifyToken: async (token) =>
         token === TOKEN
-          ? OWNER
+          ? { ...OWNER, emailVerified: true }
           : token === "stranger"
-            ? { id: "22222222-2222-4222-8222-222222222222", email: "stranger@example.com" }
+            ? { id: "22222222-2222-4222-8222-222222222222", email: "stranger@example.com", emailVerified: true }
             : null,
       calendarOAuth: options.calendarOAuth ?? null,
       oauthState,

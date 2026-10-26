@@ -125,45 +125,13 @@ export function createApiRouter(deps: ApiDeps): Router {
   const { repo } = deps;
   const router = Router();
 
-  const settingsRedirect = (res: Response, status: "connected" | "error", detail?: string) => {
-    const url = new URL("/settings", deps.dashboardUrl);
-    url.searchParams.set("google_calendar", status);
-    if (detail) url.searchParams.set("google_calendar_detail", detail);
-    res.redirect(url.toString());
-  };
-
-  // Google redirects here without a session, so this route is public. The
-  // signed `state` proves which business started the flow.
-  router.get("/auth/google/callback", async (req: Request, res: Response) => {
-    const q = z
-      .object({ code: z.string().optional(), state: z.string().optional(), error: z.string().optional() })
-      .safeParse(req.query);
-    if (!q.success) return settingsRedirect(res, "error", "invalid_callback");
-    if (q.data.error) return settingsRedirect(res, "error", q.data.error.slice(0, 64));
-    if (!q.data.code || !q.data.state) return settingsRedirect(res, "error", "missing_code");
-    if (!deps.calendarOAuth?.configured) return settingsRedirect(res, "error", "not_configured");
-
-    const state = deps.oauthState.verify(q.data.state);
-    if (!state) return settingsRedirect(res, "error", "invalid_state");
-
-    const business = await repo.getBusiness(state.bid);
-    if (!business || business.owner_user_id !== state.uid) {
-      return settingsRedirect(res, "error", "business_mismatch");
-    }
-
-    try {
-      await deps.calendarOAuth.connect(business.id, q.data.code);
-      deps.logger.info("calendar.connected", { businessId: business.id });
-      settingsRedirect(res, "connected");
-    } catch (err) {
-      deps.logger.warn("calendar.connect_failed", { businessId: business.id, error: String(err) });
-      settingsRedirect(res, "error", "oauth_failed");
-    }
-  });
-
   router.use(createRequireAuth({ verifyToken: deps.verifyToken, repo }));
 
   // ─── Google Calendar ────────────────────────────────────────────────
+  // Google redirects the browser to the dashboard (GOOGLE_REDIRECT_URI), which
+  // posts the code and state back here with the owner's session. Completion is
+  // therefore bound to the authenticated user and business that started the
+  // flow, not to whoever merely holds a valid state.
   router.get("/auth/google/start", (req, res) => {
     if (!deps.calendarOAuth?.configured) {
       res.status(503).json({ error: "Google Calendar is not configured on this server" });
@@ -171,6 +139,36 @@ export function createApiRouter(deps: ApiDeps): Router {
     }
     const { businessId, userId } = auth(req);
     res.json({ url: deps.calendarOAuth.getAuthUrl(deps.oauthState.sign({ businessId, userId })) });
+  });
+
+  router.post("/auth/google/complete", async (req: Request, res: Response) => {
+    if (!deps.calendarOAuth?.configured) {
+      res.status(503).json({ error: "Google Calendar is not configured on this server" });
+      return;
+    }
+    const body = z
+      .object({ code: z.string().min(1).max(2048), state: z.string().min(1).max(4096) })
+      .safeParse(req.body ?? {});
+    if (!body.success) return badRequest(res, body.error);
+
+    const { businessId, userId } = auth(req);
+    const state = deps.oauthState.verify(body.data.state);
+    // Bind completion to the same user and business that started the flow. This
+    // is the control that stops a grant completed in another browser, or by
+    // another signed-in user, from attaching a calendar to this business.
+    if (!state || state.bid !== businessId || state.uid !== userId) {
+      res.status(400).json({ error: "invalid_state" });
+      return;
+    }
+
+    try {
+      await deps.calendarOAuth.connect(businessId, body.data.code);
+      deps.logger.info("calendar.connected", { businessId });
+      res.json({ ok: true });
+    } catch (err) {
+      deps.logger.warn("calendar.connect_failed", { businessId, error: String(err) });
+      res.status(502).json({ error: "oauth_failed" });
+    }
   });
 
   router.delete("/auth/google", async (req, res) => {
@@ -268,11 +266,14 @@ export function createApiRouter(deps: ApiDeps): Router {
       res.status(404).json({ error: "Call not found" });
       return;
     }
-    const [appointments, messages] = await Promise.all([
+    const [appointments, messages, callerHistory] = await Promise.all([
       repo.listAppointmentsForVapiCall(call.vapi_call_id),
       repo.listMessagesForVapiCall(call.vapi_call_id),
+      call.caller_number
+        ? repo.getCallerHistory(auth(req).businessId, call.caller_number, deps.now())
+        : Promise.resolve(null),
     ]);
-    res.json({ ...call, appointments, messages });
+    res.json({ ...call, appointments, messages, caller_history: callerHistory });
   });
 
   router.patch("/calls/:id", async (req, res) => {

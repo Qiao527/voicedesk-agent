@@ -4,6 +4,7 @@ import type {
   Business,
   BusinessUpdate,
   CallAnalysisUpdate,
+  CallerHistory,
   CallRecord,
   CallUpsert,
   FaqItem,
@@ -27,8 +28,17 @@ export interface Repository {
   getBusiness(businessId: string): Promise<Business | null>;
   findBusinessByVapiNumber(phoneNumber: string): Promise<Business | null>;
   findBusinessByVapiPhoneId(phoneId: string): Promise<Business | null>;
-  /** Resolve the business a dashboard user owns. May backfill `owner_user_id`. */
-  findBusinessIdForUser(user: { id: string; email: string | null }): Promise<string | null>;
+  /**
+   * Resolve the business a dashboard user owns. May claim an unclaimed business
+   * by an exact, case-insensitive `owner_email` match — but only for a verified
+   * email, so controlling a look-alike or unconfirmed address cannot take over
+   * another tenant.
+   */
+  findBusinessIdForUser(user: {
+    id: string;
+    email: string | null;
+    emailVerified: boolean;
+  }): Promise<string | null>;
   updateBusiness(businessId: string, patch: BusinessUpdate): Promise<Business | null>;
   getCalendarTokens(businessId: string): Promise<unknown>;
   saveCalendarTokens(businessId: string, tokens: unknown, connectedAt: string): Promise<void>;
@@ -43,6 +53,16 @@ export interface Repository {
   // ─── Calls ─────────────────────────────────────────────────────────
   listCalls(businessId: string, options: { limit: number; since?: string }): Promise<CallRecord[]>;
   getCall(businessId: string, callId: string): Promise<CallRecord | null>;
+  /**
+   * What the business remembers about a phone number from its earlier calls and
+   * appointments. Powers the returning-caller greeting and the dashboard's
+   * caller context. Returns null when the number is new to the business.
+   */
+  getCallerHistory(
+    businessId: string,
+    callerNumber: string,
+    now: Date,
+  ): Promise<CallerHistory | null>;
   /** Idempotent on `vapi_call_id`: Vapi retries end-of-call reports. */
   upsertCall(input: CallUpsert): Promise<CallRecord>;
   saveCallAnalysis(callId: string, update: CallAnalysisUpdate): Promise<void>;

@@ -148,17 +148,21 @@ alter table messages      enable row level security;
 alter table appointments  enable row level security;
 alter table faq_items     enable row level security;
 
+-- The dashboard talks to the server API only; no browser code queries these
+-- tables directly (it uses supabase-js solely for auth). So owners get SELECT
+-- for defense in depth, FAQ full access, and message read-state updates — but
+-- no direct UPDATE on businesses. A table-wide owner UPDATE policy had no
+-- column limit, which would let a direct PostgREST client rewrite operator-only
+-- routing and status columns the API never exposes. Writes are additionally
+-- revoked from anon/authenticated below, so only the service role writes.
+
 create policy "businesses_owner_select" on businesses for select
-  using (auth.uid() = owner_user_id);
-create policy "businesses_owner_update" on businesses for update
   using (auth.uid() = owner_user_id);
 
 create policy "calls_owner_select" on calls for select
   using (business_id in (select id from businesses where owner_user_id = auth.uid()));
 
 create policy "messages_owner_select" on messages for select
-  using (business_id in (select id from businesses where owner_user_id = auth.uid()));
-create policy "messages_owner_update" on messages for update
   using (business_id in (select id from businesses where owner_user_id = auth.uid()));
 
 create policy "appointments_owner_select" on appointments for select
@@ -167,3 +171,13 @@ create policy "appointments_owner_select" on appointments for select
 create policy "faq_items_owner_all" on faq_items for all
   using (business_id in (select id from businesses where owner_user_id = auth.uid()))
   with check (business_id in (select id from businesses where owner_user_id = auth.uid()));
+
+-- Every write (business edits, FAQ changes, marking messages read, call
+-- logging) flows through the server API under the service role. Revoke direct
+-- writes from the browser-reachable roles, and stop later tables from being
+-- re-granted. These grants come from Supabase defaults, not from this file.
+revoke insert, update, delete, truncate
+  on businesses, calls, messages, appointments, faq_items
+  from anon, authenticated;
+alter default privileges in schema public
+  revoke insert, update, delete, truncate on tables from anon, authenticated;

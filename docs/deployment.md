@@ -57,9 +57,14 @@ Add the dashboard origin to the server's `DASHBOARD_URL` (comma-separated if you
 
 ## 5. Google Calendar (optional)
 
+Google redirects the browser back to the **dashboard**, which completes the
+connection with the owner's logged-in session. This binds the grant to the
+authenticated owner, so a link opened in another browser cannot attach a
+calendar to someone else's business.
+
 1. In Google Cloud, create an OAuth client (Web application) and enable the Google Calendar API.
-2. Add `https://<server>/api/auth/google/callback` as an authorized redirect URI.
-3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` on the server.
+2. Add `https://<dashboard>/settings` as an authorized redirect URI (dev: `http://localhost:5173/settings`).
+3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (the same `https://<dashboard>/settings`) on the server.
 4. The owner connects from **Settings → Integrations** in the dashboard.
 
 ## 6. Notifications (optional)

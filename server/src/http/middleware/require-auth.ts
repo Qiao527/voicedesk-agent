@@ -14,7 +14,9 @@ declare module "express-serve-static-core" {
 }
 
 /** Resolves a bearer token to a user. Supabase in production, a stub in tests. */
-export type VerifyAccessToken = (token: string) => Promise<{ id: string; email: string | null } | null>;
+export type VerifyAccessToken = (
+  token: string,
+) => Promise<{ id: string; email: string | null; emailVerified: boolean } | null>;
 
 /**
  * Authenticate a dashboard request and scope it to the caller's business.

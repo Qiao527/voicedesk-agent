@@ -1,7 +1,7 @@
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { demoBusiness } from "../../src/demo/fixtures";
-import type { CallRecord } from "../../src/domain/types";
+import type { Appointment, CallRecord } from "../../src/domain/types";
 import { buildTestApp, OWNER, TOKEN } from "../helpers/test-app";
 
 const authed = (app: ReturnType<typeof buildTestApp>["app"]) => ({
@@ -165,6 +165,49 @@ describe("messages and calls", () => {
     expect(res.body.follow_up_required).toBe(false);
   });
 
+  it("returns caller history with a call detail", async () => {
+    const number = "+16175550199";
+    const older = callRow({ caller_number: number, created_at: "2026-10-01T10:00:00.000Z" });
+    const recent = callRow({
+      caller_number: number,
+      caller_name: "Jordan Lee",
+      outcome: "appointment_booked",
+      created_at: "2026-10-15T10:00:00.000Z",
+    });
+    const appt: Appointment = {
+      id: crypto.randomUUID(),
+      business_id: demoBusiness().id,
+      call_id: null,
+      caller_name: "Jordan Lee",
+      caller_phone: number,
+      service_type: "Cleaning",
+      start_time: "2026-10-25T14:00:00.000Z",
+      end_time: "2026-10-25T14:45:00.000Z",
+      duration_min: 45,
+      reason: "Cleaning",
+      notes: null,
+      google_event_id: null,
+      status: "confirmed",
+      _vapi_call_id: null,
+      created_at: "2026-10-15T10:05:00.000Z",
+    };
+    const { app } = buildTestApp({ seed: { calls: [older, recent], appointments: [appt] } });
+
+    const res = await authed(app).get(`/api/calls/${recent.id}`).expect(200);
+    expect(res.body.caller_history).toMatchObject({
+      caller_name: "Jordan Lee",
+      call_count: 2,
+      upcoming_appointment: { reason: "Cleaning" },
+    });
+  });
+
+  it("reports a lone call as having no earlier history", async () => {
+    const solo = callRow({ caller_number: "+16175550123" });
+    const { app } = buildTestApp({ seed: { calls: [solo] } });
+    const res = await authed(app).get(`/api/calls/${solo.id}`).expect(200);
+    expect(res.body.caller_history).toMatchObject({ call_count: 1, upcoming_appointment: null });
+  });
+
   it("summarizes analytics in the business time zone", async () => {
     const { app } = buildTestApp({
       seed: {
@@ -194,34 +237,48 @@ describe("Google Calendar OAuth", () => {
     connect: vi.fn(async () => {}),
   });
 
-  it("issues a signed URL and accepts a matching callback", async () => {
+  it("issues a signed URL and completes the flow for the owner who started it", async () => {
     const calendarOAuth = oauth();
     const { app, oauthState } = buildTestApp({ calendarOAuth });
     const start = await authed(app).get("/api/auth/google/start").expect(200);
     const state = new URL(start.body.url).searchParams.get("state")!;
     expect(oauthState.verify(state)).toBeTruthy();
 
-    const cb = await request(app).get(`/api/auth/google/callback?code=abc&state=${state}`).expect(302);
-    expect(cb.headers.location).toBe("http://localhost:5173/settings?google_calendar=connected");
+    const done = await authed(app).post("/api/auth/google/complete", { code: "abc", state }).expect(200);
+    expect(done.body).toEqual({ ok: true });
     expect(calendarOAuth.connect).toHaveBeenCalledWith(demoBusiness().id, "abc");
   });
 
-  it("rejects forged state and states for a business the user doesn't own", async () => {
+  it("requires a session and rejects completion by another user or with a forged state", async () => {
     const calendarOAuth = oauth();
     const { app, oauthState } = buildTestApp({ calendarOAuth });
+    const state = oauthState.sign({ businessId: demoBusiness().id, userId: OWNER.id });
 
-    const forged = await request(app).get("/api/auth/google/callback?code=abc&state=forged.sig").expect(302);
-    expect(forged.headers.location).toMatch(/invalid_state/);
+    // No bearer token at all: the completion endpoint is authenticated now.
+    await request(app).post("/api/auth/google/complete").send({ code: "abc", state }).expect(401);
 
+    // A different signed-in user cannot complete the owner's flow.
+    await request(app)
+      .post("/api/auth/google/complete")
+      .set("Authorization", "Bearer stranger")
+      .send({ code: "abc", state })
+      .expect(403);
+
+    // Forged state, and a state whose uid is not the caller, are both rejected.
+    await authed(app).post("/api/auth/google/complete", { code: "abc", state: "forged.sig" }).expect(400);
     const wrongUser = oauthState.sign({ businessId: demoBusiness().id, userId: "someone-else" });
-    const res = await request(app).get(`/api/auth/google/callback?code=abc&state=${wrongUser}`).expect(302);
-    expect(res.headers.location).toMatch(/business_mismatch/);
+    const res = await authed(app).post("/api/auth/google/complete", { code: "abc", state: wrongUser }).expect(400);
+    expect(res.body.error).toBe("invalid_state");
     expect(calendarOAuth.connect).not.toHaveBeenCalled();
+
+    // The public GET callback no longer exists (404 behind the authenticated router).
+    await authed(app).get("/api/auth/google/callback?code=abc&state=x").expect(404);
   });
 
   it("reports when calendar is not configured", async () => {
     const { app } = buildTestApp();
     await authed(app).get("/api/auth/google/start").expect(503);
+    await authed(app).post("/api/auth/google/complete", { code: "a", state: "b" }).expect(503);
   });
 });
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.0 (2026-10-26)
+
+### Calls
+- Returning-caller memory: a number that has reached the business before is greeted by name, with its call count and next appointment carried in the prompt. It is derived at read time from the existing calls and appointments tables — no separate memory store — and the receptionist confirms identity before revealing any detail, because caller ID identifies the line, not the person.
+
+### Security
+- Hardened after a structured, multi-phase audit. The first-login business claim now matches the owner email literally instead of as an ILIKE pattern; Google OAuth completion is authenticated and bound to the owner who started it; webhook auth fails closed when the secret is unset; the email-based claim refuses unverified addresses; and migration 004 drops the unrestricted owner `UPDATE` policies and revokes direct writes from `anon`/`authenticated`. Methodology, findings and the needs-validation leads are written up in [docs/security](docs/security).
+
+### Docs
+- The README now opens with a ~30-second product demo video; the Remotion source lives in [`video/`](video).
+- [ADR 6](docs/decisions/0006-voice-platform-livekit-vs-vapi.md) records the voice-platform decision: Vapi now, LiveKit as the scale and compliance exit.
+
+### Platform
+- 131 server tests (was 105); the dashboard call detail surfaces returning-caller context.
+
 ## 1.0.0 (2026-10-26)
 
 First public release.

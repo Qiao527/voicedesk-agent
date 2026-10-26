@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { DEMO_BUSINESS_ID } from "../../src/demo/fixtures";
+import type { Appointment, CallRecord } from "../../src/domain/types";
 import { createHeuristicAnalyzer } from "../../src/services/call-analyzer";
 import { buildTestApp, call, SECRET, toolCall } from "../helpers/test-app";
 
@@ -74,6 +76,83 @@ describe("assistant-request", () => {
     });
     const res = await post(app, { type: "assistant-request", call: call() }).expect(200);
     expect(res.body.assistant.name).toBe("VoiceDesk fallback");
+  });
+
+  describe("returning caller", () => {
+    const priorCall = (): CallRecord => ({
+      id: crypto.randomUUID(),
+      business_id: DEMO_BUSINESS_ID,
+      vapi_call_id: crypto.randomUUID(),
+      caller_number: "+16175550199",
+      caller_name: "Jordan Lee",
+      direction: "inbound",
+      status: "completed",
+      duration_seconds: 90,
+      summary: null,
+      transcript: null,
+      recording_url: null,
+      outcome: "appointment_booked",
+      sentiment: "positive",
+      follow_up_required: false,
+      analysis: null,
+      cost_cents: 20,
+      ended_reason: null,
+      owner_notified_at: null,
+      created_at: "2026-10-05T10:00:00.000Z",
+    });
+    const upcomingAppt = (): Appointment => ({
+      id: crypto.randomUUID(),
+      business_id: DEMO_BUSINESS_ID,
+      call_id: null,
+      caller_name: "Jordan Lee",
+      caller_phone: "+16175550199",
+      service_type: "Cleaning",
+      start_time: "2026-10-23T14:00:00.000Z",
+      end_time: "2026-10-23T14:45:00.000Z",
+      duration_min: 45,
+      reason: "Cleaning",
+      notes: null,
+      google_event_id: "evt-1",
+      status: "confirmed",
+      _vapi_call_id: null,
+      created_at: "2026-10-05T10:05:00.000Z",
+    });
+
+    it("greets a known caller by name and remembers their appointment", async () => {
+      const { app } = buildTestApp({ seed: { calls: [priorCall()], appointments: [upcomingAppt()] } });
+      const res = await post(app, { type: "assistant-request", call: call() }).expect(200);
+      const { assistant } = res.body;
+      expect(assistant.firstMessage).toContain("Welcome back to Harborview Dental!");
+      expect(assistant.firstMessage).toContain("Am I speaking with Jordan?");
+      const system = assistant.model.messages[0].content;
+      expect(system).toContain("Returning caller");
+      expect(system).toContain("Jordan Lee");
+      expect(system).toMatch(/Upcoming appointment on file: Friday, October 23/);
+      expect(system).toContain("confirm who they are");
+    });
+
+    it("treats an unrecognized number as a first-time caller", async () => {
+      const { app } = buildTestApp({ seed: { calls: [priorCall()], appointments: [upcomingAppt()] } });
+      const res = await post(app, {
+        type: "assistant-request",
+        call: { id: "new", phoneNumber: { number: "+16175550100" }, customer: { number: "+16175559999" } },
+      }).expect(200);
+      expect(res.body.assistant.firstMessage).not.toContain("Welcome back");
+      expect(res.body.assistant.model.messages[0].content).not.toContain("Returning caller");
+    });
+
+    it("answers normally when the history lookup fails", async () => {
+      const { app } = buildTestApp({
+        repoOverrides: {
+          getCallerHistory: async () => {
+            throw new Error("db timeout");
+          },
+        },
+      });
+      const res = await post(app, { type: "assistant-request", call: call() }).expect(200);
+      expect(res.body.assistant.name).toContain("Harborview Dental");
+      expect(res.body.assistant.model.messages[0].content).not.toContain("Returning caller");
+    });
   });
 });
 
@@ -162,6 +241,8 @@ describe("tool-calls", () => {
 
     expect((await book(`${wednesday}T10:00:00`)).body.results[0].result).toMatch(/no longer available/);
     expect((await book(`${wednesday}T18:00:00`)).body.results[0].result).toMatch(/outside opening hours/);
+    // Beyond the 90-day horizon, which book_appointment now enforces too.
+    expect((await book("2027-06-01T10:00:00")).body.results[0].result).toMatch(/at most 90 days/);
     expect((await book("2026-10-20T10:30:00")).body.results[0].result).toMatch(/too soon/);
     expect(state.appointments).toHaveLength(0);
   });

@@ -1,7 +1,7 @@
 import type { Api } from "./api";
-import { DEMO_BUSINESS, DEMO_FAQS, generateDemoData } from "./demo-data";
+import { DEMO_BUSINESS, DEMO_FAQS, generateDemoData, type DemoDataset } from "./demo-data";
 import { isWithinHours, localDateKey } from "./time";
-import type { AnalyticsSummary, Call, CallOutcome, Sentiment } from "./types";
+import type { AnalyticsSummary, Call, CallerHistory, CallerVisit, CallOutcome, Sentiment } from "./types";
 
 const OUTCOMES: CallOutcome[] = ["appointment_booked", "message_taken", "transferred", "faq_answered", "missed", "other"];
 const SENTIMENTS: Sentiment[] = ["positive", "neutral", "negative"];
@@ -55,6 +55,39 @@ export function summarize(calls: Call[], now: Date, days: number, tz: string, ho
   };
 }
 
+/** Mirrors server/src/domain/caller-history.ts for the in-browser demo. */
+function callerHistory(data: DemoDataset, call: Call, now: Date): CallerHistory | null {
+  const number = call.caller_number;
+  if (!number) return null;
+  const calls = data.calls
+    .filter((c) => c.caller_number === number)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const appts = data.appointments
+    .filter((a) => a.caller_phone === number)
+    .sort((a, b) => a.start_time.localeCompare(b.start_time));
+  if (calls.length === 0 && appts.length === 0) return null;
+
+  const nowIso = now.toISOString();
+  const upcoming = appts.find((a) => a.start_time >= nowIso && a.status === "confirmed") ?? null;
+  const lastVisit = [...appts].reverse().find((a) => a.start_time < nowIso) ?? null;
+  const visit = (a: (typeof appts)[number]): CallerVisit => ({
+    start_time: a.start_time,
+    reason: a.reason,
+    status: a.status,
+  });
+  const name = calls.find((c) => c.caller_name)?.caller_name ?? appts.find((a) => a.caller_name)?.caller_name ?? null;
+
+  return {
+    caller_number: number,
+    caller_name: name,
+    call_count: calls.length,
+    last_call_at: calls[0]?.created_at ?? null,
+    last_outcome: calls[0]?.outcome ?? null,
+    upcoming_appointment: upcoming ? visit(upcoming) : null,
+    last_visit: lastVisit ? visit(lastVisit) : null,
+  };
+}
+
 const delay = <T>(value: T, ms = 180): Promise<T> => new Promise((resolve) => setTimeout(() => resolve(structuredClone(value)), ms));
 
 /** In-memory API used in demo mode. Mutations persist for the session. */
@@ -90,6 +123,7 @@ export function createDemoApi(now = new Date()): Api {
         ...call,
         appointments: data.appointments.filter((a) => a.call_id === id),
         messages: data.messages.filter((m) => m.call_id === id),
+        caller_history: callerHistory(data, call, now),
       });
     },
     setFollowUp: async (id, required) => {
@@ -135,6 +169,9 @@ export function createDemoApi(now = new Date()): Api {
       }),
 
     startCalendarConnect: async () => {
+      throw new Error("Google Calendar is not available in the demo.");
+    },
+    completeCalendarConnect: async () => {
       throw new Error("Google Calendar is not available in the demo.");
     },
     disconnectCalendar: async () => {

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { buildCallerHistory } from "../domain/caller-history";
+import { normalizeEmail } from "../domain/email";
 import type { Appointment, Business, CallRecord, FaqItem, Message } from "../domain/types";
 import type { Repository } from "./repository";
 
@@ -50,8 +52,10 @@ export function createMemoryRepository(seed: Partial<MemoryState> = {}) {
     async findBusinessIdForUser(user) {
       const owned = state.businesses.find((b) => b.owner_user_id === user.id);
       if (owned) return owned.id;
+      if (!user.email || !user.emailVerified) return null;
+      const email = normalizeEmail(user.email);
       const unclaimed = state.businesses.find(
-        (b) => !b.owner_user_id && user.email && b.owner_email?.toLowerCase() === user.email.toLowerCase(),
+        (b) => !b.owner_user_id && b.owner_email && normalizeEmail(b.owner_email) === email,
       );
       if (!unclaimed) return null;
       unclaimed.owner_user_id = user.id;
@@ -120,6 +124,11 @@ export function createMemoryRepository(seed: Partial<MemoryState> = {}) {
     },
     async getCall(businessId, callId) {
       return clone(state.calls.find((c) => c.business_id === businessId && c.id === callId) ?? null);
+    },
+    async getCallerHistory(businessId, callerNumber, now) {
+      const calls = state.calls.filter((c) => c.business_id === businessId);
+      const appointments = state.appointments.filter((a) => a.business_id === businessId);
+      return clone(buildCallerHistory(callerNumber, calls, appointments, now));
     },
     async upsertCall(input) {
       const existing = state.calls.find((c) => c.vapi_call_id === input.vapi_call_id);
