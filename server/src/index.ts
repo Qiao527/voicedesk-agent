@@ -1,5 +1,7 @@
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { createApp } from "./app";
 import { allowedOrigins, ConfigError, loadEnv } from "./config/env";
 import { createLogger, serializeError } from "./lib/logger";
@@ -10,7 +12,15 @@ import { createNotifier } from "./services/notifier";
 import { createOAuthStateSigner } from "./services/oauth-state";
 import { createTokenCipher } from "./services/token-cipher";
 
-const version = process.env.npm_package_version ?? "dev";
+/** Works from src/ (tsx), dist/ (node) and the Docker image, which all sit one level below package.json. */
+function readVersion(): string {
+  try {
+    return JSON.parse(readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version ?? "dev";
+  } catch {
+    return "dev";
+  }
+}
+const version = readVersion();
 
 function main() {
   let env;
