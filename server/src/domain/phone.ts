@@ -45,6 +45,21 @@ export function maskPhone(input: string | null | undefined): string {
   return `${trimmed.startsWith("+") ? "+" : ""}${"*".repeat(digits.length - 4)}${digits.slice(-4)}`;
 }
 
+/**
+ * True if two free-text numbers refer to the same line. Compared in E.164 when
+ * both normalize, so "(617) 555-0199" and "+16175550199" match; otherwise
+ * compared as trimmed strings. A null or empty input never matches.
+ */
+export function samePhone(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = a?.trim();
+  const right = b?.trim();
+  if (!left || !right) return false;
+  const na = normalizeE164(left);
+  const nb = normalizeE164(right);
+  if (na && nb) return na === nb;
+  return left === right;
+}
+
 /** "+16175551234" -> "(617) 555-1234"; other formats are returned unchanged. */
 export function formatPhoneForDisplay(input: string | null | undefined): string {
   if (!input) return "unknown";

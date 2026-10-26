@@ -49,6 +49,62 @@ describe("buildAssistant", () => {
   });
 });
 
+describe("returning caller", () => {
+  const history = {
+    caller_number: "+16175550199",
+    caller_name: "Jordan Lee",
+    call_count: 2,
+    last_call_at: "2026-10-10T10:00:00.000Z",
+    last_outcome: "appointment_booked" as const,
+    upcoming_appointment: { start_time: "2026-10-23T14:00:00.000Z", reason: "Cleaning", status: "confirmed" as const },
+    last_visit: null,
+  };
+
+  it("greets a recognized caller by first name and preserves the disclosure", () => {
+    const message = buildFirstMessage(demoBusiness(), history);
+    expect(message).toMatch(/^This call may be recorded/);
+    expect(message).toContain("Welcome back to Harborview Dental!");
+    expect(message).toContain("Am I speaking with Jordan?");
+  });
+
+  it("welcomes back a known number even without a name", () => {
+    const message = buildFirstMessage(demoBusiness(), { ...history, caller_name: null });
+    expect(message).toContain("Welcome back to Harborview Dental!");
+    expect(message).not.toMatch(/Am I speaking with/);
+  });
+
+  it("uses the normal greeting for a first-time caller", () => {
+    const message = buildFirstMessage(demoBusiness());
+    expect(message).toMatch(/^This call may be recorded/);
+    expect(message).toContain("Thanks for calling Harborview Dental");
+    expect(message).not.toContain("Welcome back");
+  });
+
+  it("adds a privacy-aware memory block with the upcoming appointment", () => {
+    const prompt = buildSystemPrompt(demoBusiness(), DEMO_FAQS, now, history);
+    expect(prompt).toContain("Returning caller");
+    expect(prompt).toContain("usually belongs to Jordan Lee");
+    expect(prompt).toContain("reached you 2 times before");
+    expect(prompt).toMatch(/Upcoming appointment on file: Friday, October 23.*Cleaning/);
+    expect(prompt).toContain("confirm who they are");
+  });
+
+  it("adds no memory block for a first-time caller", () => {
+    expect(buildSystemPrompt(demoBusiness(), DEMO_FAQS, now)).not.toContain("Returning caller");
+  });
+
+  it("keeps the memory block when the owner overrides the prompt", () => {
+    const prompt = buildSystemPrompt(
+      demoBusiness({ system_prompt_override: "Talk like a pirate." }),
+      [],
+      now,
+      history,
+    );
+    expect(prompt).toContain("Returning caller");
+    expect(prompt).toContain("Talk like a pirate.");
+  });
+});
+
 describe("schemas", () => {
   it("unwraps the Vapi envelope", () => {
     expect(extractMessage({ message: { type: "status-update" } })?.type).toBe("status-update");

@@ -4,6 +4,7 @@ import type {
   Business,
   BusinessUpdate,
   CallAnalysisUpdate,
+  CallerHistory,
   CallRecord,
   CallUpsert,
   FaqItem,
@@ -52,6 +53,16 @@ export interface Repository {
   // ─── Calls ─────────────────────────────────────────────────────────
   listCalls(businessId: string, options: { limit: number; since?: string }): Promise<CallRecord[]>;
   getCall(businessId: string, callId: string): Promise<CallRecord | null>;
+  /**
+   * What the business remembers about a phone number from its earlier calls and
+   * appointments. Powers the returning-caller greeting and the dashboard's
+   * caller context. Returns null when the number is new to the business.
+   */
+  getCallerHistory(
+    businessId: string,
+    callerNumber: string,
+    now: Date,
+  ): Promise<CallerHistory | null>;
   /** Idempotent on `vapi_call_id`: Vapi retries end-of-call reports. */
   upsertCall(input: CallUpsert): Promise<CallRecord>;
   saveCallAnalysis(callId: string, update: CallAnalysisUpdate): Promise<void>;

@@ -65,9 +65,27 @@ export interface Appointment {
   created_at: string;
 }
 
+export interface CallerVisit {
+  start_time: string;
+  reason: string | null;
+  status: Appointment["status"];
+}
+
+/** What the business remembers about a caller's number from earlier activity. */
+export interface CallerHistory {
+  caller_number: string;
+  caller_name: string | null;
+  call_count: number;
+  last_call_at: string | null;
+  last_outcome: CallOutcome | null;
+  upcoming_appointment: CallerVisit | null;
+  last_visit: CallerVisit | null;
+}
+
 export interface CallDetail extends Call {
   appointments: Appointment[];
   messages: Message[];
+  caller_history: CallerHistory | null;
 }
 
 export interface FaqItem {

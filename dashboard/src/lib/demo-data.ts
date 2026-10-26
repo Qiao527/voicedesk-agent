@@ -115,6 +115,26 @@ const LAST = [
   "Dubois",
 ];
 
+/**
+ * A few familiar numbers that call more than once, so the dashboard shows
+ * returning-caller context. Each has a fixed name and number; the indices in
+ * REGULAR_AT decide which generated calls belong to them.
+ */
+const REGULARS = [
+  { name: "Priya Shah", number: "+16175550148" },
+  { name: "Marcus Bell", number: "+16175550176" },
+  { name: "Elena Fiore", number: "+16175550133" },
+];
+const REGULAR_AT = new Map<number, number>([
+  [5, 0],
+  [18, 0],
+  [37, 0],
+  [11, 1],
+  [29, 1],
+  [16, 2],
+  [44, 2],
+]);
+
 interface Scenario {
   weight: number;
   outcome: CallOutcome;
@@ -350,7 +370,9 @@ export function generateDemoData(now = new Date(), count = 64): DemoDataset {
 
   for (let i = 0; i < count; i++) {
     const scenario = pinned[i] ?? pickScenario(rand());
-    const name = `${FIRST[Math.floor(rand() * FIRST.length)]} ${LAST[Math.floor(rand() * LAST.length)]}`;
+    const randomName = `${FIRST[Math.floor(rand() * FIRST.length)]} ${LAST[Math.floor(rand() * LAST.length)]}`;
+    const regular = REGULAR_AT.has(i) ? REGULARS[REGULAR_AT.get(i)!] : null;
+    const name = regular?.name ?? randomName;
     let daysAgo = i < pinned.length ? i : Math.floor(rand() * 29);
     // Fewer calls on weekends, like a real practice.
     if ([0, 6].includes(localInstant(now, daysAgo, 12, 0).getUTCDay()) && rand() < 0.7) daysAgo += 2;
@@ -367,7 +389,8 @@ export function generateDemoData(now = new Date(), count = 64): DemoDataset {
 
     const id = `call-${String(i + 1).padStart(3, "0")}`;
     const vapiId = `vapi-${id}`;
-    const number = `+1617555${String(1000 + Math.floor(rand() * 8999)).slice(-4)}`;
+    const randomNumber = `+1617555${String(1000 + Math.floor(rand() * 8999)).slice(-4)}`;
+    const number = regular?.number ?? randomNumber;
     const duration = Math.round(scenario.duration[0] + rand() * (scenario.duration[1] - scenario.duration[0]));
     const isMissed = scenario.outcome === "missed";
     const callerName = isMissed ? null : name;

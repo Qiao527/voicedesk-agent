@@ -266,11 +266,14 @@ export function createApiRouter(deps: ApiDeps): Router {
       res.status(404).json({ error: "Call not found" });
       return;
     }
-    const [appointments, messages] = await Promise.all([
+    const [appointments, messages, callerHistory] = await Promise.all([
       repo.listAppointmentsForVapiCall(call.vapi_call_id),
       repo.listMessagesForVapiCall(call.vapi_call_id),
+      call.caller_number
+        ? repo.getCallerHistory(auth(req).businessId, call.caller_number, deps.now())
+        : Promise.resolve(null),
     ]);
-    res.json({ ...call, appointments, messages });
+    res.json({ ...call, appointments, messages, caller_history: callerHistory });
   });
 
   router.patch("/calls/:id", async (req, res) => {

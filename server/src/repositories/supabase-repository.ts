@@ -1,4 +1,10 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
+import {
+  buildCallerHistory,
+  phoneMatchCandidates,
+  type CallerHistoryAppointment,
+  type CallerHistoryCall,
+} from "../domain/caller-history";
 import { likePatternForExactEmail, normalizeEmail } from "../domain/email";
 import type { Appointment, Business, CallRecord, FaqItem, Message } from "../domain/types";
 import type { Repository } from "./repository";
@@ -206,6 +212,33 @@ export function createSupabaseRepository(db: SupabaseClient): Repository {
         .eq("id", callId)
         .maybeSingle();
       return unwrap("getCall", res) as CallRecord | null;
+    },
+
+    async getCallerHistory(businessId, callerNumber, now) {
+      const candidates = phoneMatchCandidates(callerNumber);
+      if (candidates.length === 0) return null;
+
+      // The `.in` filter is a coarse match on the stored formats; buildCallerHistory
+      // re-checks each row with samePhone so only the same line is counted.
+      const [callsRes, apptsRes] = await Promise.all([
+        db
+          .from("calls")
+          .select("caller_number, caller_name, outcome, created_at")
+          .eq("business_id", businessId)
+          .in("caller_number", candidates)
+          .order("created_at", { ascending: false })
+          .limit(100),
+        db
+          .from("appointments")
+          .select("caller_name, caller_phone, reason, start_time, status")
+          .eq("business_id", businessId)
+          .in("caller_phone", candidates)
+          .order("start_time", { ascending: false })
+          .limit(100),
+      ]);
+      const calls = (unwrap("getCallerHistory", callsRes) ?? []) as CallerHistoryCall[];
+      const appointments = (unwrap("getCallerHistory", apptsRes) ?? []) as CallerHistoryAppointment[];
+      return buildCallerHistory(callerNumber, calls, appointments, now);
     },
 
     async upsertCall(input) {

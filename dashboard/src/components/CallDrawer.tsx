@@ -1,4 +1,4 @@
-import { CalendarCheck, CheckCircle2, Clock, DollarSign, Flag, MessageSquare, Phone, X } from "lucide-react";
+import { CalendarCheck, CalendarClock, CheckCircle2, Clock, DollarSign, Flag, History, MessageSquare, Phone, X } from "lucide-react";
 import { useEffect } from "react";
 import { api } from "../lib/api";
 import { useBusiness } from "../lib/business";
@@ -78,10 +78,54 @@ export function CallDrawer({ callId, onClose, onChange }: { callId: string; onCl
                   </Badge>
                 )}
                 {call.sentiment && <Badge tone={SENTIMENT_META[call.sentiment].tone}>{SENTIMENT_META[call.sentiment].label}</Badge>}
+                {call.caller_history && call.caller_history.call_count > 1 && (
+                  <Badge tone="indigo" dot>
+                    Returning caller
+                  </Badge>
+                )}
                 {call.analysis?.topics.map((t) => (
                   <Badge key={t}>{t}</Badge>
                 ))}
               </div>
+
+              {call.caller_history &&
+                (call.caller_history.call_count > 1 ||
+                  call.caller_history.upcoming_appointment ||
+                  call.caller_history.last_visit) && (
+                  <section className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-4 py-3">
+                    <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-indigo-700 uppercase">
+                      <History className="size-3.5" />
+                      Caller history
+                    </h3>
+                    <ul className="space-y-1.5 text-sm text-indigo-950">
+                      {call.caller_history.call_count > 1 && (
+                        <li>
+                          {call.caller_history.caller_name ?? "This number"} has reached you{" "}
+                          {call.caller_history.call_count} times.
+                        </li>
+                      )}
+                      {call.caller_history.upcoming_appointment ? (
+                        <li className="flex items-center gap-2">
+                          <CalendarClock className="size-4 shrink-0 text-indigo-500" />
+                          <span>
+                            Upcoming: {call.caller_history.upcoming_appointment.reason ?? "appointment"} ·{" "}
+                            {formatDateTime(call.caller_history.upcoming_appointment.start_time, timeZone)}
+                          </span>
+                        </li>
+                      ) : (
+                        call.caller_history.last_visit && (
+                          <li className="flex items-center gap-2">
+                            <CalendarClock className="size-4 shrink-0 text-indigo-500" />
+                            <span>
+                              Last visit: {call.caller_history.last_visit.reason ?? "appointment"} ·{" "}
+                              {formatDateTime(call.caller_history.last_visit.start_time, timeZone)}
+                            </span>
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </section>
+                )}
 
               {call.follow_up_required && (
                 <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">

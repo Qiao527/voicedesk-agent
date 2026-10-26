@@ -178,6 +178,15 @@ async function main() {
     artifact: { transcript },
   });
   await Promise.all(pending);
+
+  // The same number rings back a week later. Capture the greeting before the
+  // server shuts down; VoiceDesk recognizes the caller from the call and
+  // appointment above — no memory service, just the existing tables.
+  const { assistant: back } = await post({
+    type: "assistant-request",
+    call: { id: `demo-${Date.now()}-return`, phoneNumber: { number: DEMO_PHONE_NUMBER }, customer: call.customer },
+  });
+
   server.close();
 
   const row = state.calls[0];
@@ -198,6 +207,21 @@ async function main() {
         .split("\n")
         .map((l) => `   ${l}`)
         .join("\n"),
+    );
+
+  step(7, "Same caller rings back → recognized");
+  say("AI", back.firstMessage);
+  const memory = (back.model.messages[0].content as string)
+    .split("\n\n")
+    .find((block: string) => block.startsWith("Returning caller"));
+  if (memory)
+    console.log(
+      c.dim(
+        memory
+          .split("\n")
+          .map((l) => `   ${l}`)
+          .join("\n"),
+      ),
     );
   console.log();
 }

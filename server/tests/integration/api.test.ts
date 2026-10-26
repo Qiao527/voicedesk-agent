@@ -1,7 +1,7 @@
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { demoBusiness } from "../../src/demo/fixtures";
-import type { CallRecord } from "../../src/domain/types";
+import type { Appointment, CallRecord } from "../../src/domain/types";
 import { buildTestApp, OWNER, TOKEN } from "../helpers/test-app";
 
 const authed = (app: ReturnType<typeof buildTestApp>["app"]) => ({
@@ -163,6 +163,49 @@ describe("messages and calls", () => {
     const { app } = buildTestApp({ seed: { calls: [row] } });
     const res = await authed(app).patch(`/api/calls/${row.id}`, { follow_up_required: false }).expect(200);
     expect(res.body.follow_up_required).toBe(false);
+  });
+
+  it("returns caller history with a call detail", async () => {
+    const number = "+16175550199";
+    const older = callRow({ caller_number: number, created_at: "2026-10-01T10:00:00.000Z" });
+    const recent = callRow({
+      caller_number: number,
+      caller_name: "Jordan Lee",
+      outcome: "appointment_booked",
+      created_at: "2026-10-15T10:00:00.000Z",
+    });
+    const appt: Appointment = {
+      id: crypto.randomUUID(),
+      business_id: demoBusiness().id,
+      call_id: null,
+      caller_name: "Jordan Lee",
+      caller_phone: number,
+      service_type: "Cleaning",
+      start_time: "2026-10-25T14:00:00.000Z",
+      end_time: "2026-10-25T14:45:00.000Z",
+      duration_min: 45,
+      reason: "Cleaning",
+      notes: null,
+      google_event_id: null,
+      status: "confirmed",
+      _vapi_call_id: null,
+      created_at: "2026-10-15T10:05:00.000Z",
+    };
+    const { app } = buildTestApp({ seed: { calls: [older, recent], appointments: [appt] } });
+
+    const res = await authed(app).get(`/api/calls/${recent.id}`).expect(200);
+    expect(res.body.caller_history).toMatchObject({
+      caller_name: "Jordan Lee",
+      call_count: 2,
+      upcoming_appointment: { reason: "Cleaning" },
+    });
+  });
+
+  it("reports a lone call as having no earlier history", async () => {
+    const solo = callRow({ caller_number: "+16175550123" });
+    const { app } = buildTestApp({ seed: { calls: [solo] } });
+    const res = await authed(app).get(`/api/calls/${solo.id}`).expect(200);
+    expect(res.body.caller_history).toMatchObject({ call_count: 1, upcoming_appointment: null });
   });
 
   it("summarizes analytics in the business time zone", async () => {
