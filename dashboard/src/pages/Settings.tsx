@@ -1,422 +1,631 @@
-import { useEffect, useState, useCallback } from "react";
-import {
-  Save,
-  Plus,
-  Trash2,
-  MessageSquare,
-  Building2,
-  CalendarDays,
-  ExternalLink,
-} from "lucide-react";
-import {
-  fetchBusiness,
-  updateBusiness,
-  fetchFaqs,
-  createFaq,
-  deleteFaq,
-  startGoogleCalendarConnect,
-  type Business,
-  type FaqItem,
-} from "../lib/api";
+import { clsx } from "clsx";
+import { BookOpen, Building2, CalendarDays, Check, Clock, Eye, Pencil, Phone, Plus, Plug, Save, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router";
+import { useToast } from "../components/Toast";
+import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Textarea } from "../components/ui";
+import { api } from "../lib/api";
+import { useBusiness } from "../lib/business";
+import { IS_DEMO } from "../lib/config";
+import { formatPhone } from "../lib/format";
+import { parseRange } from "../lib/time";
+import { WEEKDAYS, type Business, type BusinessHours, type FaqItem, type Weekday } from "../lib/types";
+import { useAsync } from "../lib/use-async";
 
-export default function Settings() {
-  const [biz, setBiz] = useState<Business | null>(null);
-  const [faqs, setFaqs] = useState<FaqItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+type Tab = "business" | "hours" | "receptionist" | "knowledge" | "integrations";
 
-  const [greeting, setGreeting] = useState("");
-  const [recordingDisclosure, setRecordingDisclosure] = useState("");
-  const [name, setName] = useState("");
-  const [address, setAddress] = useState("");
-  const [timezone, setTimezone] = useState("");
-  const [ownerPhone, setOwnerPhone] = useState("");
-  const [ownerEmail, setOwnerEmail] = useState("");
+const TABS: Array<{ id: Tab; label: string; icon: typeof Building2 }> = [
+  { id: "business", label: "Business", icon: Building2 },
+  { id: "hours", label: "Hours & booking", icon: Clock },
+  { id: "receptionist", label: "Receptionist", icon: Sparkles },
+  { id: "knowledge", label: "Knowledge base", icon: BookOpen },
+  { id: "integrations", label: "Integrations", icon: Plug },
+];
 
-  const [newQ, setNewQ] = useState("");
-  const [newA, setNewA] = useState("");
-  const [newCat, setNewCat] = useState("");
+const DAY_LABELS: Record<Weekday, string> = {
+  mon: "Monday",
+  tue: "Tuesday",
+  wed: "Wednesday",
+  thu: "Thursday",
+  fri: "Friday",
+  sat: "Saturday",
+  sun: "Sunday",
+};
 
-  const [connectingCalendar, setConnectingCalendar] = useState(false);
+const COMMON_ZONES = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Phoenix",
+  "America/Los_Angeles",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+];
 
-  const handleConnectCalendar = async () => {
-    setConnectingCalendar(true);
-    try {
-      await startGoogleCalendarConnect();
-    } catch (err) {
-      setConnectingCalendar(false);
-      setToast(
-        err instanceof Error
-          ? `Could not start Google Calendar: ${err.message}`
-          : "Could not start Google Calendar",
-      );
-    }
+function allTimeZones(): string[] {
+  const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
+  const rest = intl.supportedValuesOf?.("timeZone") ?? [];
+  return [...COMMON_ZONES, ...rest.filter((z) => !COMMON_ZONES.includes(z))];
+}
+
+type Draft = Pick<
+  Business,
+  | "name"
+  | "owner_name"
+  | "owner_phone"
+  | "owner_email"
+  | "address"
+  | "timezone"
+  | "greeting_message"
+  | "recording_disclosure"
+  | "appointment_duration_min"
+> & { business_hours: BusinessHours };
+
+function toDraft(b: Business): Draft {
+  return {
+    name: b.name,
+    owner_name: b.owner_name ?? "",
+    owner_phone: b.owner_phone ?? "",
+    owner_email: b.owner_email ?? "",
+    address: b.address ?? "",
+    timezone: b.timezone,
+    greeting_message: b.greeting_message ?? "",
+    recording_disclosure: b.recording_disclosure ?? "",
+    appointment_duration_min: b.appointment_duration_min,
+    business_hours: { ...(b.business_hours ?? {}) },
   };
+}
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  }, []);
+// ─── Hours editor ────────────────────────────────────────────────────
 
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    const status = url.searchParams.get("google_calendar");
-    const detail = url.searchParams.get("google_calendar_detail");
+function toHHMM(minutes: number) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
 
-    if (!status) return;
-
-    if (status === "connected") {
-      showToast("Google Calendar connected");
-    } else {
-      showToast(
-        detail ? `Google Calendar connection failed: ${detail}` : "Google Calendar connection failed",
-      );
-    }
-
-    url.searchParams.delete("google_calendar");
-    url.searchParams.delete("google_calendar_detail");
-    const next = `${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ""}${url.hash}`;
-    window.history.replaceState({}, "", next);
-  }, [showToast]);
-
-  useEffect(() => {
-    Promise.all([fetchBusiness(), fetchFaqs()])
-      .then(([b, f]) => {
-        setBiz(b);
-        setFaqs(f);
-        setGreeting(b.greeting_message || "");
-        setRecordingDisclosure(b.recording_disclosure || "");
-        setName(b.name);
-        setAddress(b.address || "");
-        setTimezone(b.timezone);
-        setOwnerPhone(b.owner_phone || "");
-        setOwnerEmail(b.owner_email || "");
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
-
-  const saveBusiness = async () => {
-    setSaving(true);
-    try {
-      const updated = await updateBusiness({
-        name,
-        address,
-        timezone,
-        owner_phone: ownerPhone || null,
-        owner_email: ownerEmail || null,
-        greeting_message: greeting || null,
-        recording_disclosure: recordingDisclosure || null,
-      });
-      setBiz(updated);
-      showToast("Settings saved");
-    } catch (err) {
-      console.error(err);
-      showToast(
-        err instanceof Error ? `Failed to save: ${err.message}` : "Failed to save",
-      );
-    }
-    setSaving(false);
-  };
-
-  const addFaq = async () => {
-    if (!newQ.trim() || !newA.trim()) return;
-    try {
-      const created = await createFaq({
-        question: newQ,
-        answer: newA,
-        category: newCat || undefined,
-      });
-      setFaqs((prev) => [...prev, created]);
-      setNewQ("");
-      setNewA("");
-      setNewCat("");
-      showToast("FAQ added");
-    } catch (err) {
-      console.error(err);
-      showToast(
-        err instanceof Error
-          ? `Failed to add FAQ: ${err.message}`
-          : "Failed to add FAQ",
-      );
-    }
-  };
-
-  const removeFaq = async (id: string) => {
-    try {
-      await deleteFaq(id);
-      setFaqs((prev) => prev.filter((f) => f.id !== id));
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  if (loading) {
-    return <div className="text-center py-16 text-body">Loading settings...</div>;
-  }
-
-  const calendarConnected = Boolean(biz?.google_calendar_connected_at);
-
+function HoursEditor({ value, onChange }: { value: BusinessHours; onChange: (v: BusinessHours) => void }) {
   return (
-    <div className="max-w-2xl">
-      {/* Toast */}
-      {toast && (
-        <div className="fixed top-6 right-6 z-50 bg-navy text-white text-sm px-4 py-2.5 rounded-lg shadow-elevated-lg animate-fade-in">
-          {toast}
-        </div>
-      )}
-
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight text-heading">
-          Settings
-        </h1>
-        <p className="text-sm text-body mt-1">
-          Configure your AI receptionist
-        </p>
-      </div>
-
-      {/* Business Info */}
-      <section className="bg-white rounded-lg border border-border shadow-elevated p-6 mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Building2 className="w-4 h-4 text-purple" />
-          <h2 className="text-sm font-semibold text-heading">
-            Business Information
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-label mb-1">
-              Business name
+    <div className="divide-y divide-slate-100">
+      {WEEKDAYS.map((day) => {
+        const range = parseRange(value[day]);
+        const open = Boolean(range);
+        const set = (o: string, c: string) =>
+          onChange({ ...value, [day]: `${Number(o.slice(0, 2))}:${o.slice(3)}-${Number(c.slice(0, 2))}:${c.slice(3)}` });
+        return (
+          <div key={day} className="flex flex-wrap items-center gap-3 px-5 py-3">
+            <label className="flex w-36 items-center gap-2.5 text-sm font-medium text-slate-800">
+              <input
+                type="checkbox"
+                className="accent-brand-600 size-4 rounded border-slate-300"
+                checked={open}
+                onChange={(e) => onChange({ ...value, [day]: e.target.checked ? "9:00-17:00" : "closed" })}
+              />
+              {DAY_LABELS[day]}
             </label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-label mb-1">
-              Timezone
-            </label>
-            <input
-              value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple"
-            />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-label mb-1">
-              Address
-            </label>
-            <input
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-label mb-1">
-              Owner phone (for notifications)
-            </label>
-            <input
-              value={ownerPhone}
-              onChange={(e) => setOwnerPhone(e.target.value)}
-              placeholder="+16175551234"
-              className="w-full px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-label mb-1">
-              Owner email
-            </label>
-            <input
-              value={ownerEmail}
-              onChange={(e) => setOwnerEmail(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple"
-            />
-          </div>
-        </div>
-
-        {biz?.vapi_phone_number && (
-          <div className="mt-4 px-3 py-2 bg-purple-surface rounded-md">
-            <p className="text-xs text-purple-deep">
-              AI phone number:{" "}
-              <span className="font-mono font-medium">{biz.vapi_phone_number}</span>
-            </p>
-          </div>
-        )}
-      </section>
-
-      {/* Google Calendar */}
-      <section className="bg-white rounded-lg border border-border shadow-elevated p-6 mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <CalendarDays className="w-4 h-4 text-purple" />
-          <h2 className="text-sm font-semibold text-heading">
-            Google Calendar
-          </h2>
-        </div>
-
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm text-heading font-medium">
-              {calendarConnected ? "Calendar connected" : "Calendar not connected"}
-            </p>
-            <p className="text-sm text-body mt-1">
-              {calendarConnected
-                ? "Appointments can be checked and booked against this business's Google Calendar."
-                : "Connect Google Calendar to enable live availability checks and appointment booking."}
-            </p>
-            {biz?.google_calendar_connected_at && (
-              <p className="text-xs text-muted mt-2">
-                Connected on{" "}
-                {new Date(biz.google_calendar_connected_at).toLocaleString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              </p>
+            {open && range ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500">
+                <Input
+                  type="time"
+                  step={900}
+                  className="w-32"
+                  value={toHHMM(range.open)}
+                  onChange={(e) => e.target.value && set(e.target.value, toHHMM(range.close))}
+                  aria-label={`${DAY_LABELS[day]} opening time`}
+                />
+                to
+                <Input
+                  type="time"
+                  step={900}
+                  className="w-32"
+                  value={toHHMM(range.close)}
+                  onChange={(e) => e.target.value && set(toHHMM(range.open), e.target.value)}
+                  aria-label={`${DAY_LABELS[day]} closing time`}
+                />
+              </div>
+            ) : (
+              <span className="text-sm text-slate-400">Closed</span>
             )}
           </div>
+        );
+      })}
+    </div>
+  );
+}
 
-          <button
-            type="button"
-            onClick={handleConnectCalendar}
-            disabled={connectingCalendar}
-            className="inline-flex shrink-0 items-center gap-2 px-4 py-2 bg-purple text-white text-sm font-medium rounded-md hover:bg-purple-hover transition-colors disabled:opacity-50"
+// ─── Knowledge base ──────────────────────────────────────────────────
+
+function FaqRow({
+  faq,
+  onSave,
+  onDelete,
+}: {
+  faq: FaqItem;
+  onSave: (patch: Partial<FaqItem>) => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [q, setQ] = useState(faq.question);
+  const [a, setA] = useState(faq.answer);
+  const [busy, setBusy] = useState(false);
+
+  if (editing) {
+    return (
+      <div className="space-y-2 bg-slate-50/60 px-5 py-4">
+        <Input value={q} onChange={(e) => setQ(e.target.value)} aria-label="Question" />
+        <Textarea value={a} onChange={(e) => setA(e.target.value)} rows={3} aria-label="Answer" />
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="ghost" icon={X} onClick={() => setEditing(false)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            icon={Check}
+            loading={busy}
+            disabled={!q.trim() || !a.trim()}
+            onClick={async () => {
+              setBusy(true);
+              await onSave({ question: q.trim(), answer: a.trim() });
+              setBusy(false);
+              setEditing(false);
+            }}
           >
-            {connectingCalendar
-              ? "Starting..."
-              : calendarConnected
-                ? "Reconnect"
-                : "Connect"}
-            <ExternalLink className="w-4 h-4" />
-          </button>
+            Save
+          </Button>
         </div>
-      </section>
-
-      {/* Greeting */}
-      <section className="bg-white rounded-lg border border-border shadow-elevated p-6 mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <MessageSquare className="w-4 h-4 text-purple" />
-          <h2 className="text-sm font-semibold text-heading">
-            Greeting Message
-          </h2>
-        </div>
-
-        <textarea
-          value={greeting}
-          onChange={(e) => setGreeting(e.target.value)}
-          rows={3}
-          className="w-full px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple resize-y"
-        />
-        <p className="text-xs text-muted mt-2">
-          What the AI says when it first picks up the phone.
-        </p>
-      </section>
-
-      {/* Recording disclosure (legal) */}
-      <section className="bg-white rounded-lg border border-border shadow-elevated p-6 mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <MessageSquare className="w-4 h-4 text-purple" />
-          <h2 className="text-sm font-semibold text-heading">
-            Call Recording Disclosure
-          </h2>
-        </div>
-
-        <textarea
-          value={recordingDisclosure}
-          onChange={(e) => setRecordingDisclosure(e.target.value)}
-          rows={2}
-          placeholder="This call may be recorded for quality and scheduling."
-          className="w-full px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple resize-y"
-        />
-        <p className="text-xs text-muted mt-2">
-          Spoken to the caller before the greeting. Two-party-consent states
-          (CA, FL, IL, MD, MA, MT, NV, NH, PA, WA) legally require a
-          disclosure before recording. Leave blank at your own risk.
-        </p>
-      </section>
-
-      {/* Save button */}
-      <div className="flex justify-end mb-8">
-        <button
-          onClick={saveBusiness}
-          disabled={saving}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-purple text-white text-sm font-medium rounded-md hover:bg-purple-hover transition-colors disabled:opacity-50"
-        >
-          <Save className="w-4 h-4" />
-          {saving ? "Saving..." : "Save changes"}
-        </button>
       </div>
+    );
+  }
 
-      {/* FAQs */}
-      <section className="bg-white rounded-lg border border-border shadow-elevated p-6">
-        <h2 className="text-sm font-semibold text-heading mb-1">
-          FAQ Knowledge Base
-        </h2>
-        <p className="text-xs text-muted mb-4">
-          The AI uses these to answer common caller questions. Changes take
-          effect immediately.
-        </p>
+  return (
+    <div className="group flex items-start gap-3 px-5 py-4">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-slate-900">{faq.question}</p>
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">{faq.answer}</p>
+        {faq.category && (
+          <span className="mt-2 inline-block">
+            <Badge>{faq.category}</Badge>
+          </span>
+        )}
+      </div>
+      <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+        <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setEditing(true)} aria-label="Edit FAQ" />
+        <Button size="sm" variant="danger" icon={Trash2} onClick={onDelete} aria-label="Delete FAQ" />
+      </div>
+    </div>
+  );
+}
 
-        <div className="divide-y divide-border">
-          {faqs.map((faq) => (
-            <div key={faq.id} className="py-3 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-heading">{faq.question}</p>
-                <p className="text-sm text-body mt-0.5">{faq.answer}</p>
-                {faq.category && (
-                  <span className="inline-block mt-1 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-surface text-muted rounded">
-                    {faq.category}
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={() => removeFaq(faq.id)}
-                className="shrink-0 p-1 text-muted hover:text-ruby transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
+function KnowledgeBase() {
+  const toast = useToast();
+  const { data: faqs, loading, setData } = useAsync(() => api.listFaqs());
+  const [q, setQ] = useState("");
+  const [a, setA] = useState("");
+  const [cat, setCat] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  async function add() {
+    setAdding(true);
+    try {
+      const created = await api.createFaq({ question: q.trim(), answer: a.trim(), category: cat.trim() || null });
+      setData((prev) => [...(prev ?? []), created]);
+      setQ("");
+      setA("");
+      setCat("");
+      toast("FAQ added. The next call will use it.");
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Knowledge base"
+        description="The receptionist answers questions only from this list. Changes apply to the next call."
+      />
+      {loading && !faqs ? (
+        <Skeleton className="m-5 h-40" />
+      ) : (
+        <div className="divide-y divide-slate-100">
+          {(faqs ?? []).map((faq) => (
+            <FaqRow
+              key={faq.id}
+              faq={faq}
+              onSave={async (patch) => {
+                try {
+                  const updated = await api.updateFaq(faq.id, patch);
+                  setData((prev) => (prev ?? []).map((f) => (f.id === faq.id ? updated : f)));
+                  toast("FAQ updated");
+                } catch (err) {
+                  toast((err as Error).message, "error");
+                }
+              }}
+              onDelete={async () => {
+                const prev = faqs;
+                setData((list) => (list ?? []).filter((f) => f.id !== faq.id));
+                try {
+                  await api.deleteFaq(faq.id);
+                } catch (err) {
+                  setData(prev ?? []);
+                  toast((err as Error).message, "error");
+                }
+              }}
+            />
           ))}
         </div>
+      )}
+      <div className="space-y-2 border-t border-slate-100 bg-slate-50/50 px-5 py-4">
+        <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Add a question</p>
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. Do you see children?" aria-label="New question" />
+        <Textarea
+          value={a}
+          onChange={(e) => setA(e.target.value)}
+          rows={2}
+          placeholder="e.g. Yes, we see patients from age 3."
+          aria-label="New answer"
+        />
+        <div className="flex gap-2">
+          <Input
+            value={cat}
+            onChange={(e) => setCat(e.target.value)}
+            placeholder="Category (optional)"
+            className="flex-1"
+            aria-label="Category"
+          />
+          <Button variant="primary" icon={Plus} onClick={add} loading={adding} disabled={!q.trim() || !a.trim()}>
+            Add
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
 
-        {/* Add FAQ form */}
-        <div className="mt-4 pt-4 border-t border-border space-y-2">
-          <input
-            value={newQ}
-            onChange={(e) => setNewQ(e.target.value)}
-            placeholder="Question — e.g. What are your business hours?"
-            className="w-full px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple"
-          />
-          <input
-            value={newA}
-            onChange={(e) => setNewA(e.target.value)}
-            placeholder="Answer — e.g. We're open Mon–Fri, 9am to 5pm."
-            className="w-full px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple"
-          />
-          <div className="flex items-center gap-2">
-            <input
-              value={newCat}
-              onChange={(e) => setNewCat(e.target.value)}
-              placeholder="Category (optional)"
-              className="flex-1 px-3 py-2 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-purple/20 focus:border-purple"
-            />
-            <button
-              onClick={addFaq}
-              disabled={!newQ.trim() || !newA.trim()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 bg-purple text-white text-sm font-medium rounded-md hover:bg-purple-hover transition-colors disabled:opacity-50"
+// ─── Integrations ────────────────────────────────────────────────────
+
+function Integration({
+  icon: Icon,
+  title,
+  body,
+  status,
+  action,
+}: {
+  icon: typeof Phone;
+  title: string;
+  body: ReactNode;
+  status: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center">
+      <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600">
+        <Icon className="size-5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-semibold text-slate-900">{title}</p>
+          {status}
+        </div>
+        <p className="mt-0.5 text-sm text-slate-500">{body}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function Integrations({ business, onChange }: { business: Business; onChange: (b: Business) => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const connected = Boolean(business.google_calendar_connected_at);
+
+  return (
+    <Card className="divide-y divide-slate-100">
+      <Integration
+        icon={Phone}
+        title="Phone number"
+        status={
+          business.vapi_phone_number ? (
+            <Badge tone="green" dot>
+              Live
+            </Badge>
+          ) : (
+            <Badge tone="amber">Not set</Badge>
+          )
+        }
+        body={
+          business.vapi_phone_number ? (
+            <>
+              Callers reach your receptionist at{" "}
+              <span className="font-medium text-slate-700">{formatPhone(business.vapi_phone_number)}</span>. Forward your existing line here
+              to cover missed calls.
+            </>
+          ) : (
+            "Provision a number with the onboarding CLI (npm run setup)."
+          )
+        }
+      />
+      <Integration
+        icon={CalendarDays}
+        title="Google Calendar"
+        status={
+          connected ? (
+            <Badge tone="green" dot>
+              Connected
+            </Badge>
+          ) : (
+            <Badge>Not connected</Badge>
+          )
+        }
+        body={
+          connected
+            ? `Live availability and booking on the "${business.calendar_id ?? "primary"}" calendar since ${new Date(business.google_calendar_connected_at!).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}.`
+            : "Connect a calendar so the receptionist can check free/busy and book appointments."
+        }
+        action={
+          connected ? (
+            <Button
+              variant="ghost"
+              loading={busy}
+              onClick={async () => {
+                setBusy(true);
+                await api.disconnectCalendar();
+                onChange({ ...business, google_calendar_connected_at: null });
+                setBusy(false);
+                toast("Google Calendar disconnected");
+              }}
             >
-              <Plus className="w-4 h-4" />
-              Add
-            </button>
+              Disconnect
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              loading={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  window.location.href = await api.startCalendarConnect();
+                } catch (err) {
+                  toast((err as Error).message, "error");
+                  setBusy(false);
+                }
+              }}
+            >
+              Connect
+            </Button>
+          )
+        }
+      />
+    </Card>
+  );
+}
+
+// ─── Page ────────────────────────────────────────────────────────────
+
+export default function Settings() {
+  const { business, loading, error, setBusiness } = useBusiness();
+  const toast = useToast();
+  const [params, setParams] = useSearchParams();
+  const tab = (TABS.some((t) => t.id === params.get("tab")) ? params.get("tab") : "business") as Tab;
+  // null = no unsaved edits; the form shows the saved business.
+  const [edits, setEdits] = useState<Draft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(false);
+  const preview = useAsync(() => (showPrompt ? api.getPromptPreview() : Promise.resolve(null)), [showPrompt]);
+  const zones = useMemo(() => allTimeZones(), []);
+
+  // Result of the Google OAuth redirect.
+  useEffect(() => {
+    const status = params.get("google_calendar");
+    if (!status) return;
+    if (status === "connected") toast("Google Calendar connected");
+    else toast(`Google Calendar connection failed (${params.get("google_calendar_detail") ?? "unknown"})`, "error");
+    setParams({ tab: "integrations" }, { replace: true });
+  }, [params, setParams, toast]);
+
+  if (error) return <ErrorState error={error} />;
+  if (loading || !business) return <Skeleton className="h-96 rounded-xl" />;
+
+  const original = toDraft(business);
+  const draft = edits ?? original;
+  const dirty = edits !== null && JSON.stringify(original) !== JSON.stringify(edits);
+  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setEdits({ ...draft, [key]: value });
+
+  async function save() {
+    setSaving(true);
+    try {
+      const updated = await api.updateBusiness({
+        ...draft,
+        owner_name: draft.owner_name || null,
+        owner_phone: draft.owner_phone || null,
+        owner_email: draft.owner_email || null,
+        address: draft.address || null,
+        greeting_message: draft.greeting_message || null,
+        recording_disclosure: draft.recording_disclosure || null,
+      });
+      setBusiness(updated);
+      setEdits(null);
+      toast("Settings saved");
+      if (showPrompt) void preview.reload();
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="pb-20">
+      <PageHeader title="Settings" description="Everything your receptionist knows about your business." />
+
+      <div className="mb-6 flex gap-1 overflow-x-auto border-b border-slate-200">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setParams({ tab: t.id }, { replace: true })}
+            className={clsx(
+              "-mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors",
+              tab === t.id ? "border-brand-600 text-brand-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800",
+            )}
+          >
+            <t.icon className="size-4" />
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="max-w-3xl space-y-6">
+        {tab === "business" && (
+          <Card>
+            <CardHeader title="Business details" description="Used in the greeting, the system prompt, and owner notifications." />
+            <div className="grid gap-4 p-5 sm:grid-cols-2">
+              <Field label="Business name" htmlFor="name">
+                <Input id="name" value={draft.name} onChange={(e) => set("name", e.target.value)} />
+              </Field>
+              <Field label="Time zone" htmlFor="tz" hint="Bookings and reports use this zone.">
+                <Select id="tz" value={draft.timezone} onChange={(e) => set("timezone", e.target.value)}>
+                  {zones.map((z) => (
+                    <option key={z} value={z}>
+                      {z.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Address" htmlFor="address" className="sm:col-span-2">
+                <Input id="address" value={draft.address ?? ""} onChange={(e) => set("address", e.target.value)} />
+              </Field>
+              <Field label="Owner name" htmlFor="owner">
+                <Input id="owner" value={draft.owner_name ?? ""} onChange={(e) => set("owner_name", e.target.value)} />
+              </Field>
+              <Field label="Owner email" htmlFor="email" hint="Receives a summary after every call.">
+                <Input id="email" type="email" value={draft.owner_email ?? ""} onChange={(e) => set("owner_email", e.target.value)} />
+              </Field>
+              <Field label="Owner mobile" htmlFor="phone" hint="SMS alerts and live transfers go here. Leave empty to disable transfers.">
+                <Input
+                  id="phone"
+                  type="tel"
+                  value={draft.owner_phone ?? ""}
+                  placeholder="+16175551234"
+                  onChange={(e) => set("owner_phone", e.target.value)}
+                />
+              </Field>
+            </div>
+          </Card>
+        )}
+
+        {tab === "hours" && (
+          <>
+            <Card>
+              <CardHeader title="Opening hours" description="The receptionist only offers appointments inside these hours." />
+              <HoursEditor value={draft.business_hours} onChange={(v) => set("business_hours", v)} />
+            </Card>
+            <Card>
+              <CardHeader title="Booking" />
+              <div className="p-5">
+                <Field
+                  label="Default appointment length"
+                  htmlFor="duration"
+                  hint="Slots are offered on a 30-minute grid with at least one hour's notice."
+                >
+                  <Select
+                    id="duration"
+                    className="sm:w-48"
+                    value={draft.appointment_duration_min}
+                    onChange={(e) => set("appointment_duration_min", Number(e.target.value))}
+                  >
+                    {[15, 20, 30, 45, 60, 90, 120].map((m) => (
+                      <option key={m} value={m}>
+                        {m} minutes
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            </Card>
+          </>
+        )}
+
+        {tab === "receptionist" && (
+          <>
+            <Card>
+              <CardHeader title="Greeting" description="The first thing callers hear." />
+              <div className="space-y-4 p-5">
+                <Field
+                  label="Recording disclosure"
+                  htmlFor="disclosure"
+                  hint="Spoken before the greeting. Two-party-consent states (CA, FL, IL, MD, MA, MT, NV, NH, PA, WA) require one."
+                >
+                  <Textarea
+                    id="disclosure"
+                    rows={2}
+                    value={draft.recording_disclosure ?? ""}
+                    onChange={(e) => set("recording_disclosure", e.target.value)}
+                  />
+                </Field>
+                <Field label="Greeting" htmlFor="greeting">
+                  <Textarea
+                    id="greeting"
+                    rows={2}
+                    value={draft.greeting_message ?? ""}
+                    onChange={(e) => set("greeting_message", e.target.value)}
+                  />
+                </Field>
+                <div className="border-brand-100 bg-brand-50/60 text-brand-900 rounded-lg border px-4 py-3 text-sm">
+                  <span className="font-medium">Callers will hear: </span>
+                  {[draft.recording_disclosure, draft.greeting_message || `Thanks for calling ${draft.name}, how can I help you today?`]
+                    .filter(Boolean)
+                    .join(" ")}
+                </div>
+              </div>
+            </Card>
+            <Card>
+              <CardHeader
+                title="System prompt"
+                description="The full instructions your receptionist receives on every call, generated from your settings."
+                action={
+                  <Button size="sm" icon={Eye} onClick={() => setShowPrompt((v) => !v)}>
+                    {showPrompt ? "Hide" : "Preview"}
+                  </Button>
+                }
+              />
+              {showPrompt && (
+                <div className="p-5">
+                  {preview.loading ? (
+                    <Skeleton className="h-64" />
+                  ) : (
+                    <pre className="max-h-[28rem] overflow-auto rounded-lg bg-slate-950 p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-200">
+                      {preview.data?.systemPrompt}
+                    </pre>
+                  )}
+                  {dirty && <p className="mt-2 text-xs text-amber-700">Save your changes to see them reflected here.</p>}
+                </div>
+              )}
+            </Card>
+          </>
+        )}
+
+        {tab === "knowledge" && <KnowledgeBase />}
+        {tab === "integrations" && <Integrations business={business} onChange={setBusiness} />}
+      </div>
+
+      {dirty && tab !== "knowledge" && tab !== "integrations" && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur lg:left-60">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+            <p className="text-sm text-slate-600">
+              You have unsaved changes{IS_DEMO && <span className="text-slate-400"> (demo: saved for this session only)</span>}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => setEdits(null)}>
+                Discard
+              </Button>
+              <Button variant="primary" icon={Save} loading={saving} onClick={save}>
+                Save changes
+              </Button>
+            </div>
           </div>
         </div>
-      </section>
+      )}
     </div>
   );
 }
