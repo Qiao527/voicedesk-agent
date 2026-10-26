@@ -1,200 +1,122 @@
-import { useEffect, useState } from "react";
-import { Calendar, Phone, Clock, ExternalLink } from "lucide-react";
-import { fetchAppointments, type Appointment } from "../lib/api";
+import { CalendarDays, ExternalLink, Phone } from "lucide-react";
+import { useState } from "react";
+import { Link } from "react-router";
+import { Badge, Card, EmptyState, ErrorState, PageHeader, Segmented, Skeleton } from "../components/ui";
+import { api } from "../lib/api";
+import { useBusiness } from "../lib/business";
+import { formatLongDate, formatPhone, formatTime, type Tone } from "../lib/format";
+import { localDateKey } from "../lib/time";
+import type { Appointment } from "../lib/types";
+import { useAsync } from "../lib/use-async";
 
-const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
-  confirmed: { bg: "bg-green-50", text: "text-success-text" },
-  cancelled: { bg: "bg-red-50", text: "text-ruby" },
-  completed: { bg: "bg-gray-100", text: "text-gray-500" },
-  rescheduled: { bg: "bg-amber-50", text: "text-amber-700" },
+const STATUS: Record<Appointment["status"], { label: string; tone: Tone }> = {
+  confirmed: { label: "Confirmed", tone: "green" },
+  completed: { label: "Completed", tone: "slate" },
+  cancelled: { label: "Cancelled", tone: "rose" },
+  no_show: { label: "No-show", tone: "amber" },
 };
 
-function localDateKey(iso: string) {
-  // Group by the viewer's local calendar date (YYYY-MM-DD) so appointments
-  // don't drift into the next UTC day just because it's late in the evening.
-  const d = new Date(iso);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function formatDateKey(key: string) {
-  // `key` is YYYY-MM-DD in the viewer's local calendar. Parse as local date,
-  // not ISO (ISO with no time is interpreted as UTC, which can shift a day).
-  const [y, m, d] = key.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function isUpcoming(iso: string) {
-  return new Date(iso) >= new Date();
-}
-
-function groupByDate(appointments: Appointment[]) {
-  const groups = new Map<string, Appointment[]>();
-  for (const appt of appointments) {
-    const key = localDateKey(appt.start_time);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(appt);
-  }
-  return groups;
-}
-
 export default function Appointments() {
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { timeZone } = useBusiness();
+  const { data, loading, error, reload } = useAsync(() => api.listAppointments());
   const [tab, setTab] = useState<"upcoming" | "past">("upcoming");
+  const [now] = useState(() => Date.now());
 
-  useEffect(() => {
-    fetchAppointments()
-      .then(setAppointments)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+  const list = (data ?? [])
+    .filter((a) => (tab === "upcoming" ? new Date(a.end_time).getTime() >= now : new Date(a.end_time).getTime() < now))
+    .sort((a, b) => (tab === "upcoming" ? a.start_time.localeCompare(b.start_time) : b.start_time.localeCompare(a.start_time)));
 
-  const filtered = appointments.filter((a) =>
-    tab === "upcoming" ? isUpcoming(a.start_time) : !isUpcoming(a.start_time),
-  );
-
-  const upcomingCount = appointments.filter((a) => isUpcoming(a.start_time)).length;
-  const grouped = groupByDate(filtered);
-  const sortedDates = Array.from(grouped.keys()).sort((a, b) =>
-    tab === "upcoming" ? a.localeCompare(b) : b.localeCompare(a),
-  );
+  // Group by the business's calendar day, not the viewer's.
+  const groups = new Map<string, Appointment[]>();
+  for (const a of list) {
+    const key = localDateKey(new Date(a.start_time), timeZone);
+    groups.set(key, [...(groups.get(key) ?? []), a]);
+  }
+  const upcoming = data?.filter((a) => new Date(a.end_time).getTime() >= now).length ?? 0;
+  const today = localDateKey(new Date(), timeZone);
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-semibold tracking-tight text-heading">
-              Appointments
-            </h1>
-            {upcomingCount > 0 && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-success-text">
-                {upcomingCount} upcoming
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-body mt-1">
-            {appointments.length} total appointment{appointments.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Appointments"
+        description={`Booked by your receptionist and synced to Google Calendar. Times shown in ${timeZone.replace(/_/g, " ")}.`}
+        actions={
+          <Segmented
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: "upcoming", label: `Upcoming${upcoming ? ` (${upcoming})` : ""}` },
+              { value: "past", label: "Past" },
+            ]}
+          />
+        }
+      />
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-5 bg-surface rounded-md p-1 w-fit border border-border">
-        {(["upcoming", "past"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-1.5 text-sm rounded transition-colors capitalize ${
-              tab === t
-                ? "bg-white text-heading font-medium shadow-sm border border-border"
-                : "text-body hover:text-heading"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div className="text-center py-16 text-body">Loading appointments...</div>
-      ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-lg border border-border shadow-elevated text-center py-16 px-8">
-          <Calendar className="w-10 h-10 text-muted mx-auto mb-3" />
-          <p className="text-heading font-medium">
-            No {tab} appointments
-          </p>
-          <p className="text-sm text-body mt-1">
-            {tab === "upcoming"
-              ? "New bookings from calls will appear here."
-              : "Past appointments will appear here."}
-          </p>
-        </div>
+      {error ? (
+        <ErrorState error={error} onRetry={reload} />
+      ) : loading && !data ? (
+        <Skeleton className="h-80 rounded-xl" />
+      ) : groups.size === 0 ? (
+        <Card>
+          <EmptyState
+            icon={CalendarDays}
+            title={`No ${tab} appointments`}
+            body={tab === "upcoming" ? "New bookings from calls will appear here." : "Past appointments will appear here."}
+          />
+        </Card>
       ) : (
         <div className="space-y-6">
-          {sortedDates.map((dateKey) => (
-            <div key={dateKey}>
-              <h2 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2 px-1">
-                {formatDateKey(dateKey)}
+          {[...groups].map(([day, items]) => (
+            <section key={day}>
+              <h2 className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                {formatLongDate(day)}
+                {day === today && <Badge tone="indigo">Today</Badge>}
               </h2>
-              <div className="bg-white rounded-lg border border-border shadow-elevated divide-y divide-border overflow-hidden">
-                {grouped.get(dateKey)!.map((appt) => {
-                  const statusStyle =
-                    STATUS_STYLES[appt.status] ?? STATUS_STYLES.confirmed;
-
-                  return (
-                    <div key={appt.id} className="px-4 py-3 flex items-center gap-4">
-                      {/* Time block */}
-                      <div className="w-16 shrink-0 text-center">
-                        <p className="text-sm font-semibold text-heading">
-                          {new Date(appt.start_time).toLocaleTimeString("en-US", {
-                            hour: "numeric",
-                            minute: "2-digit",
-                            hour12: true,
-                          })}
-                        </p>
-                        <p className="text-xs text-muted flex items-center justify-center gap-0.5 mt-0.5">
-                          <Clock className="w-3 h-3" />
-                          {appt.duration_min}m
-                        </p>
+              <Card className="divide-y divide-slate-100">
+                {items.map((a) => (
+                  <div key={a.id} className="flex items-center gap-4 px-4 py-3.5 sm:px-5">
+                    <div className="w-20 shrink-0">
+                      <p className="tabular text-sm font-semibold text-slate-900">{formatTime(a.start_time, timeZone)}</p>
+                      <p className="text-xs text-slate-500">{a.duration_min} min</p>
+                    </div>
+                    <div className="h-9 w-px bg-slate-200" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-sm font-medium text-slate-900">{a.caller_name}</p>
+                        <Badge tone={STATUS[a.status].tone}>{STATUS[a.status].label}</Badge>
                       </div>
-
-                      {/* Divider */}
-                      <div className="w-px h-10 bg-border shrink-0" />
-
-                      {/* Details */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-heading truncate">
-                            {appt.caller_name}
-                          </p>
-                          <span
-                            className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${statusStyle.bg} ${statusStyle.text} shrink-0`}
-                          >
-                            {appt.status}
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-slate-500">
+                        {a.reason && <span>{a.reason}</span>}
+                        {a.caller_phone && (
+                          <span className="flex items-center gap-1">
+                            <Phone className="size-3" />
+                            {formatPhone(a.caller_phone)}
                           </span>
-                        </div>
-                        <div className="flex items-center gap-3 mt-0.5">
-                          {appt.reason && (
-                            <span className="text-xs text-body capitalize">
-                              {appt.reason}
-                            </span>
-                          )}
-                          {appt.caller_phone && (
-                            <span className="flex items-center gap-1 text-xs text-muted">
-                              <Phone className="w-3 h-3" />
-                              {appt.caller_phone}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Google Calendar link */}
-                      {appt.google_event_id && (
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs">
+                      {a.call_id && (
+                        <Link to={`/calls?call=${a.call_id}`} className="text-brand-600 hover:text-brand-700 hidden font-medium sm:inline">
+                          View call
+                        </Link>
+                      )}
+                      {a.google_event_id && (
                         <a
-                          href={`https://calendar.google.com/calendar/r/eventedit/${appt.google_event_id}`}
+                          href="https://calendar.google.com/calendar/r"
                           target="_blank"
-                          rel="noopener noreferrer"
-                          className="shrink-0 text-muted hover:text-purple transition-colors"
-                          title="View in Google Calendar"
+                          rel="noreferrer"
+                          className="hover:text-brand-600 text-slate-400"
+                          title="Open Google Calendar"
                         >
-                          <ExternalLink className="w-4 h-4" />
+                          <ExternalLink className="size-4" />
                         </a>
                       )}
                     </div>
-                  );
-                })}
-              </div>
-            </div>
+                  </div>
+                ))}
+              </Card>
+            </section>
           ))}
         </div>
       )}

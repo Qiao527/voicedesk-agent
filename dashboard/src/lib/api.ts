@@ -1,198 +1,95 @@
+import { API_BASE, IS_DEMO } from "./config";
+import { createDemoApi } from "./demo-api";
 import { supabase } from "./supabase";
+import type { AnalyticsSummary, Appointment, Business, BusinessUpdate, Call, CallDetail, FaqItem, Message, PromptPreview } from "./types";
 
-const BASE = import.meta.env.VITE_API_URL
-  ? `${import.meta.env.VITE_API_URL}/api`
-  : "/api";
+export interface Api {
+  getBusiness(): Promise<Business>;
+  updateBusiness(patch: BusinessUpdate): Promise<Business>;
+  getPromptPreview(): Promise<PromptPreview>;
 
-async function authHeader(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  listCalls(): Promise<Call[]>;
+  getCall(id: string): Promise<CallDetail>;
+  setFollowUp(id: string, required: boolean): Promise<Call>;
+
+  listMessages(): Promise<Message[]>;
+  setMessageRead(id: string, isRead: boolean): Promise<void>;
+
+  listAppointments(): Promise<Appointment[]>;
+
+  listFaqs(): Promise<FaqItem[]>;
+  createFaq(input: { question: string; answer: string; category?: string | null }): Promise<FaqItem>;
+  updateFaq(id: string, patch: Partial<Pick<FaqItem, "question" | "answer" | "category">>): Promise<FaqItem>;
+  deleteFaq(id: string): Promise<void>;
+
+  getAnalytics(days?: number): Promise<AnalyticsSummary>;
+
+  startCalendarConnect(): Promise<string>;
+  disconnectCalendar(): Promise<void>;
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const baseHeaders: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(await authHeader()),
-  };
-  const extra = (options?.headers as Record<string, string> | undefined) ?? {};
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers: { ...baseHeaders, ...extra },
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const session = supabase ? (await supabase.auth.getSession()).data.session : null;
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      ...init.headers,
+    },
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API ${res.status}: ${text}`);
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = body.error;
+    } catch {
+      // Non-JSON error body; keep the generic message.
+    }
+    throw new ApiError(res.status, message);
   }
-
-  // PATCH endpoints may return 204 / empty body.
-  const contentType = res.headers.get("content-type") || "";
-  if (!contentType.includes("application/json")) {
-    return undefined as T;
-  }
-  return res.json() as Promise<T>;
+  return (res.headers.get("content-type")?.includes("application/json") ? res.json() : undefined) as Promise<T>;
 }
 
-// ─── Calls ───────────────────────────────────────────────────────────
+const json = (method: string, body?: unknown): RequestInit => ({
+  method,
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
 
-export interface Call {
-  id: string;
-  vapi_call_id: string;
-  caller_number: string;
-  caller_name: string | null;
-  direction: string;
-  status: string;
-  outcome: string | null;
-  duration_seconds: number;
-  summary: string | null;
-  transcript: string | null;
-  recording_url: string | null;
-  sentiment: string | null;
-  cost_cents: number | null;
-  created_at: string;
-}
+const httpApi: Api = {
+  getBusiness: () => request("/business"),
+  updateBusiness: (patch) => request("/business", json("PATCH", patch)),
+  getPromptPreview: () => request("/business/prompt-preview"),
 
-export function fetchCalls(): Promise<Call[]> {
-  return request<Call[]>("/calls");
-}
+  listCalls: () => request("/calls?limit=200"),
+  getCall: (id) => request(`/calls/${id}`),
+  setFollowUp: (id, required) => request(`/calls/${id}`, json("PATCH", { follow_up_required: required })),
 
-// ─── Messages ────────────────────────────────────────────────────────
+  listMessages: () => request("/messages?limit=200"),
+  setMessageRead: (id, isRead) => request(`/messages/${id}`, json("PATCH", { is_read: isRead })),
 
-export interface Message {
-  id: string;
-  business_id: string | null;
-  caller_name: string;
-  caller_phone: string | null;
-  content: string;
-  urgency: "low" | "medium" | "high";
-  is_read: boolean;
-  created_at: string;
-}
+  listAppointments: () => request("/appointments?limit=200"),
 
-export function fetchMessages(): Promise<Message[]> {
-  return request<Message[]>("/messages");
-}
+  listFaqs: () => request("/faqs"),
+  createFaq: (input) => request("/faqs", json("POST", input)),
+  updateFaq: (id, patch) => request(`/faqs/${id}`, json("PATCH", patch)),
+  deleteFaq: (id) => request(`/faqs/${id}`, json("DELETE")),
 
-export function markMessageRead(id: string): Promise<void> {
-  return request<void>(`/messages/${id}/read`, { method: "PATCH" });
-}
+  getAnalytics: (days = 30) => request(`/analytics/summary?days=${days}`),
 
-// ─── FAQs ────────────────────────────────────────────────────────────
+  startCalendarConnect: async () => (await request<{ url: string }>("/auth/google/start")).url,
+  disconnectCalendar: () => request("/auth/google", json("DELETE")),
+};
 
-export interface FaqItem {
-  id: string;
-  question: string;
-  answer: string;
-  category: string | null;
-  sort_order: number;
-}
-
-export function fetchFaqs(): Promise<FaqItem[]> {
-  return request<FaqItem[]>("/faqs");
-}
-
-export function createFaq(faq: {
-  question: string;
-  answer: string;
-  category?: string;
-}): Promise<FaqItem> {
-  return request<FaqItem>("/faqs", {
-    method: "POST",
-    body: JSON.stringify(faq),
-  });
-}
-
-export function deleteFaq(id: string): Promise<void> {
-  return request<void>(`/faqs/${id}`, { method: "DELETE" });
-}
-
-// ─── Appointments ────────────────────────────────────────────────────
-
-export interface Appointment {
-  id: string;
-  business_id: string | null;
-  call_id: string | null;
-  caller_name: string;
-  caller_phone: string | null;
-  service_type: string | null;
-  start_time: string;
-  end_time: string;
-  duration_min: number;
-  reason: string | null;
-  notes: string | null;
-  google_event_id: string | null;
-  status: string;
-  created_at: string;
-}
-
-export function fetchAppointments(): Promise<Appointment[]> {
-  return request<Appointment[]>("/appointments");
-}
-
-// ─── Analytics ───────────────────────────────────────────────────────
-
-export interface AnalyticsSummary {
-  totalCalls: number;
-  avgDurationSeconds: number;
-  totalDurationSeconds: number;
-  unreadMessages: number;
-  appointmentCount: number;
-  period: string;
-}
-
-export interface DailyCallCount {
-  date: string;
-  count: number;
-}
-
-export function fetchAnalyticsSummary(): Promise<AnalyticsSummary> {
-  return request<AnalyticsSummary>("/analytics/summary");
-}
-
-export function fetchDailyCalls(): Promise<DailyCallCount[]> {
-  return request<DailyCallCount[]>("/analytics/daily-calls");
-}
-
-// ─── Business ────────────────────────────────────────────────────────
-
-export interface Business {
-  id: string;
-  name: string;
-  owner_name: string | null;
-  owner_phone: string | null;
-  owner_email: string | null;
-  address: string | null;
-  timezone: string;
-  business_hours: Record<string, string>;
-  greeting_message: string | null;
-  recording_disclosure: string | null;
-  vapi_phone_number: string | null;
-  calendar_id: string | null;
-  google_calendar_connected_at: string | null;
-  status: string;
-}
-
-export function fetchBusiness(): Promise<Business> {
-  return request<Business>("/business");
-}
-
-export function updateBusiness(
-  updates: Partial<Business>,
-): Promise<Business> {
-  return request<Business>("/business", {
-    method: "PATCH",
-    body: JSON.stringify(updates),
-  });
-}
-
-/**
- * Kick off the Google Calendar OAuth flow. The start endpoint is
- * authenticated server-side (the caller's businessId is resolved from the
- * Supabase session, not from any client-supplied value), so we fetch the
- * signed Google URL with the bearer token and then redirect the browser.
- */
-export async function startGoogleCalendarConnect(): Promise<void> {
-  const { url } = await request<{ url: string }>("/auth/google/start");
-  window.location.href = url;
-}
+export const api: Api = IS_DEMO ? createDemoApi() : httpApi;

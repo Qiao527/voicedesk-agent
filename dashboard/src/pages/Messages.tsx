@@ -1,177 +1,129 @@
-import { useEffect, useState } from "react";
-import { MessageSquare, Phone, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
-import { fetchMessages, markMessageRead, type Message } from "../lib/api";
+import { clsx } from "clsx";
+import { Inbox, Mail, MailOpen, Phone } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router";
+import { useToast } from "../components/Toast";
+import { buttonClasses } from "../components/button-classes";
+import { Avatar, Badge, Button, Card, EmptyState, ErrorState, PageHeader, Segmented, Skeleton } from "../components/ui";
+import { api } from "../lib/api";
+import { useBusiness } from "../lib/business";
+import { formatPhone, formatRelative, URGENCY_META } from "../lib/format";
+import type { Message } from "../lib/types";
+import { useAsync } from "../lib/use-async";
 
-const URGENCY_STYLES: Record<
-  string,
-  { border: string; badge: string; label: string }
-> = {
-  high: {
-    border: "border-l-ruby",
-    badge: "bg-red-50 text-ruby",
-    label: "Urgent",
-  },
-  medium: {
-    border: "border-l-amber-400",
-    badge: "bg-amber-50 text-amber-700",
-    label: "Normal",
-  },
-  low: {
-    border: "border-l-gray-200",
-    badge: "bg-gray-100 text-gray-500",
-    label: "Low",
-  },
-};
-
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
+const URGENCY_ORDER = { high: 0, medium: 1, low: 2 } as const;
 
 export default function Messages() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const { timeZone } = useBusiness();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const { data, loading, error, reload, setData } = useAsync(() => api.listMessages());
+  const [filter, setFilter] = useState<"unread" | "all">("unread");
 
-  useEffect(() => {
-    fetchMessages()
-      .then(setMessages)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+  const messages = (data ?? [])
+    .filter((m) => filter === "all" || !m.is_read)
+    .sort((a, b) =>
+      filter === "unread"
+        ? URGENCY_ORDER[a.urgency] - URGENCY_ORDER[b.urgency] || b.created_at.localeCompare(a.created_at)
+        : b.created_at.localeCompare(a.created_at),
+    );
+  const unread = data?.filter((m) => !m.is_read).length ?? 0;
 
-  const unreadCount = messages.filter((m) => !m.is_read).length;
-
-  async function handleExpand(msg: Message) {
-    const isExpanding = expandedId !== msg.id;
-    setExpandedId(isExpanding ? msg.id : null);
-
-    if (isExpanding && !msg.is_read) {
-      try {
-        await markMessageRead(msg.id);
-        setMessages((prev) =>
-          prev.map((m) => (m.id === msg.id ? { ...m, is_read: true } : m)),
-        );
-      } catch {
-        // non-critical — ignore
-      }
+  async function setRead(msg: Message, isRead: boolean) {
+    setData((prev) => (prev ?? []).map((m) => (m.id === msg.id ? { ...m, is_read: isRead } : m)));
+    try {
+      await api.setMessageRead(msg.id, isRead);
+    } catch (err) {
+      setData((prev) => (prev ?? []).map((m) => (m.id === msg.id ? msg : m)));
+      toast((err as Error).message, "error");
     }
   }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-semibold tracking-tight text-heading">
-              Messages
-            </h1>
-            {unreadCount > 0 && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-surface text-purple-deep">
-                {unreadCount} unread
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-body mt-1">
-            {messages.length} total message{messages.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Messages"
+        description="Messages callers left for your team. Urgent ones are texted to you immediately."
+        actions={
+          <Segmented
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: "unread", label: `Unread${unread ? ` (${unread})` : ""}` },
+              { value: "all", label: "All" },
+            ]}
+          />
+        }
+      />
 
-      {loading ? (
-        <div className="text-center py-16 text-body">Loading messages...</div>
+      {error ? (
+        <ErrorState error={error} onRetry={reload} />
+      ) : loading && !data ? (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-24 rounded-xl" />
+          ))}
+        </div>
       ) : messages.length === 0 ? (
-        <div className="bg-white rounded-lg border border-border shadow-elevated text-center py-16 px-8">
-          <MessageSquare className="w-10 h-10 text-muted mx-auto mb-3" />
-          <p className="text-heading font-medium">No messages yet</p>
-          <p className="text-sm text-body mt-1">
-            Messages left by callers will appear here.
-          </p>
-        </div>
+        <Card>
+          <EmptyState
+            icon={Inbox}
+            title={filter === "unread" ? "Inbox zero" : "No messages yet"}
+            body={filter === "unread" ? "Every message has been read." : "Messages left by callers will appear here."}
+          />
+        </Card>
       ) : (
-        <div className="space-y-2">
-          {messages.map((msg) => {
-            const isExpanded = expandedId === msg.id;
-            const urgency = URGENCY_STYLES[msg.urgency] ?? URGENCY_STYLES.medium;
-
-            return (
-              <div
-                key={msg.id}
-                className={`bg-white rounded-lg border border-border shadow-elevated border-l-4 ${urgency.border} ${
-                  !msg.is_read ? "ring-1 ring-purple/10" : ""
-                }`}
-              >
-                {/* Header row */}
-                <button
-                  onClick={() => handleExpand(msg)}
-                  className="w-full flex items-center justify-between px-4 py-3 text-left"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    {/* Unread dot */}
-                    <div
-                      className={`w-2 h-2 rounded-full shrink-0 ${
-                        msg.is_read ? "bg-transparent" : "bg-purple"
-                      }`}
-                    />
-
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-heading">
-                          {msg.caller_name}
-                        </span>
-                        <span
-                          className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${urgency.badge}`}
-                        >
-                          {urgency.label}
-                        </span>
-                      </div>
-                      {msg.caller_phone && (
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <Phone className="w-3 h-3 text-muted" />
-                          <span className="text-xs text-muted">
-                            {msg.caller_phone}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    <p className="text-sm text-body truncate ml-2 hidden sm:block">
-                      {msg.content}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0 ml-3">
-                    <span className="text-xs text-muted whitespace-nowrap">
-                      {formatDate(msg.created_at)}
-                    </span>
-                    {isExpanded ? (
-                      <ChevronUp className="w-4 h-4 text-muted" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 text-muted" />
-                    )}
-                  </div>
-                </button>
-
-                {/* Expanded content */}
-                {isExpanded && (
-                  <div className="px-4 pb-4 border-t border-border">
-                    <div className="flex items-start gap-2 mt-3">
-                      <AlertCircle className="w-4 h-4 text-muted mt-0.5 shrink-0" />
-                      <p className="text-sm text-body leading-relaxed">
-                        {msg.content}
-                      </p>
-                    </div>
-                  </div>
+        <ul className="space-y-3">
+          {messages.map((m) => (
+            <li key={m.id}>
+              <Card
+                className={clsx(
+                  "p-4 transition-colors sm:p-5",
+                  !m.is_read && "border-l-4",
+                  !m.is_read && (m.urgency === "high" ? "border-l-rose-500" : "border-l-brand-500"),
                 )}
-              </div>
-            );
-          })}
-        </div>
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                  <Avatar name={m.caller_name} className="hidden sm:grid" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className={clsx("text-sm text-slate-900", !m.is_read && "font-semibold")}>{m.caller_name}</p>
+                      <Badge tone={URGENCY_META[m.urgency].tone}>{URGENCY_META[m.urgency].label}</Badge>
+                      <span className="text-xs text-slate-400">{formatRelative(m.created_at, new Date(), timeZone)}</span>
+                    </div>
+                    <p className="mt-1.5 text-sm leading-relaxed text-slate-700">{m.content}</p>
+                    {m.caller_phone && <p className="mt-1.5 text-xs text-slate-500">{formatPhone(m.caller_phone)}</p>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {m.caller_phone && (
+                      <a
+                        href={`tel:${m.caller_phone}`}
+                        onClick={() => !m.is_read && void setRead(m, true)}
+                        className={buttonClasses("primary", "sm")}
+                      >
+                        <Phone className="size-4" />
+                        Call back
+                      </a>
+                    )}
+                    {m.call_id && (
+                      <Button size="sm" variant="ghost" onClick={() => navigate(`/calls?call=${m.call_id}`)}>
+                        View call
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={m.is_read ? Mail : MailOpen}
+                      onClick={() => setRead(m, !m.is_read)}
+                      title={m.is_read ? "Mark unread" : "Mark read"}
+                      aria-label={m.is_read ? "Mark unread" : "Mark read"}
+                    />
+                  </div>
+                </div>
+              </Card>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

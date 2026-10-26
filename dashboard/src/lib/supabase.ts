@@ -1,12 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { IS_DEMO, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn(
-    "Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY — auth will not work.",
-  );
-}
-
-export const supabase = createClient(supabaseUrl ?? "", supabaseAnonKey ?? "");
+/** Null in demo mode: the dashboard runs entirely on sample data. */
+export const supabase: SupabaseClient | null =
+  !IS_DEMO && SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
