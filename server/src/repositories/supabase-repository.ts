@@ -1,4 +1,5 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
+import { likePatternForExactEmail, normalizeEmail } from "../domain/email";
 import type { Appointment, Business, CallRecord, FaqItem, Message } from "../domain/types";
 import type { Repository } from "./repository";
 
@@ -70,28 +71,39 @@ export function createSupabaseRepository(db: SupabaseClient): Repository {
       const owned = unwrap("findBusinessIdForUser", byId) as { id: string } | null;
       if (owned) return owned.id;
 
-      if (!user.email) return null;
+      // Claiming an unclaimed business requires a verified email, so a
+      // look-alike or unconfirmed address cannot take over another tenant.
+      if (!user.email || !user.emailVerified) return null;
+      const email = normalizeEmail(user.email);
+      const literal = likePatternForExactEmail(user.email);
+      if (!literal) return null;
 
       // Backfill path for businesses created by the onboarding CLI before the
       // owner had an account. Only claims rows that are not owned yet.
       const byEmail = await db
         .from("businesses")
-        .select("id")
+        .select("id, owner_email")
         .is("owner_user_id", null)
-        .ilike("owner_email", user.email)
+        .ilike("owner_email", literal)
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();
-      const unclaimed = unwrap("findBusinessIdForUser", byEmail) as { id: string } | null;
-      if (!unclaimed) return null;
+      const unclaimed = unwrap("findBusinessIdForUser", byEmail) as
+        | { id: string; owner_email: string | null }
+        | null;
+      if (!unclaimed || unclaimed.owner_email?.trim().toLowerCase() !== email) return null;
 
+      // The conditional update guards against a concurrent claim: if another
+      // user won the race the row is already owned and 0 rows change, so we must
+      // not hand out the business.
       const claim = await db
         .from("businesses")
         .update({ owner_user_id: user.id })
         .eq("id", unclaimed.id)
-        .is("owner_user_id", null);
-      unwrap("claimBusiness", { data: null, error: claim.error });
-      return unclaimed.id;
+        .is("owner_user_id", null)
+        .select("id");
+      const claimed = unwrap("claimBusiness", claim) as unknown[] | null;
+      return claimed?.length === 1 ? unclaimed.id : null;
     },
 
     async updateBusiness(businessId, patch) {

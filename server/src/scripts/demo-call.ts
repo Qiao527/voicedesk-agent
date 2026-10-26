@@ -77,7 +77,7 @@ async function main() {
       },
     },
     api: {
-      verifyToken: async () => null,
+      verifyToken: async () => null as never,
       calendarOAuth: null,
       oauthState: createOAuthStateSigner("demo"),
       dashboardUrl: "http://localhost:5173",

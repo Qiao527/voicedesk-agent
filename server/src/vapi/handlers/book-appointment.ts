@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { normalizeE164 } from "../../domain/phone";
 import { checkRequestedSlot } from "../../domain/scheduling";
+import { MAX_BOOKING_HORIZON_DAYS } from "./check-availability";
 import {
   businessDayWindow,
   formatLongDate,
@@ -50,6 +51,18 @@ export async function bookAppointment(raw: Record<string, unknown>, ctx: ToolCon
   }
   const duration = business.appointment_duration_min || 30;
   const end = new Date(start.getTime() + duration * 60_000);
+
+  // Enforce the same horizon check_availability applies, so the model cannot
+  // skip the availability step and book years out (e.g. a mis-parsed year).
+  const now = deps.now();
+  if (start.getTime() < now.getTime()) {
+    return { result: "That time is in the past. Ask the caller for a future date and call check_availability." };
+  }
+  if (start.getTime() > now.getTime() + MAX_BOOKING_HORIZON_DAYS * 86_400_000) {
+    return {
+      result: `Appointments can be booked at most ${MAX_BOOKING_HORIZON_DAYS} days ahead. Offer the caller a nearer date.`,
+    };
+  }
 
   // Vapi retries tool calls on network errors. Same call + same start time
   // means we already booked it; confirm instead of double-booking.

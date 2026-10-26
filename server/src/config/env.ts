@@ -24,6 +24,15 @@ const EnvSchema = z
     VAPI_WEBHOOK_SECRET: optional,
     /** Only needed by the onboarding CLI to buy numbers; the server never calls Vapi. */
     VAPI_API_KEY: optional,
+    /**
+     * Escape hatch for local development without a secret. Must be set
+     * explicitly; it is rejected in production. Without it, a missing
+     * VAPI_WEBHOOK_SECRET fails startup in every environment.
+     */
+    ALLOW_UNAUTHENTICATED_WEBHOOKS: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
 
     VOICE_MODEL: z.string().default("claude-haiku-5-5"),
     VOICE_PROVIDER: z.string().default("vapi"),
@@ -48,11 +57,23 @@ const EnvSchema = z
     NOTIFICATION_FROM_EMAIL: optional,
   })
   .superRefine((env, ctx) => {
-    if (env.NODE_ENV === "production" && !env.VAPI_WEBHOOK_SECRET) {
+    // Fail closed on a missing webhook secret in EVERY environment. The old
+    // guard only fired for NODE_ENV=production, so a server started with the
+    // default NODE_ENV (development) and an empty secret silently accepted
+    // unauthenticated webhooks. Local development can opt out explicitly.
+    if (!env.VAPI_WEBHOOK_SECRET && !env.ALLOW_UNAUTHENTICATED_WEBHOOKS) {
       ctx.addIssue({
         code: "custom",
         path: ["VAPI_WEBHOOK_SECRET"],
-        message: "is required in production. Without it anyone can post fake calls to /webhooks/vapi.",
+        message:
+          "is required. Without it anyone can post fake calls to /webhooks/vapi. Set it, or set ALLOW_UNAUTHENTICATED_WEBHOOKS=true for local development only.",
+      });
+    }
+    if (env.NODE_ENV === "production" && env.ALLOW_UNAUTHENTICATED_WEBHOOKS) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ALLOW_UNAUTHENTICATED_WEBHOOKS"],
+        message: "must not be true in production; set VAPI_WEBHOOK_SECRET instead.",
       });
     }
     if (env.NODE_ENV === "production" && env.GOOGLE_CLIENT_ID && !env.TOKEN_ENCRYPTION_KEY) {

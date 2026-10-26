@@ -89,7 +89,14 @@ function main() {
     api: {
       verifyToken: async (token) => {
         const { data, error } = await supabase.auth.getUser(token);
-        return error || !data.user ? null : { id: data.user.id, email: data.user.email ?? null };
+        if (error || !data.user) return null;
+        return {
+          id: data.user.id,
+          email: data.user.email ?? null,
+          // Supabase sets email_confirmed_at only after the address is verified.
+          // The first-login business claim trusts this, so pass it through.
+          emailVerified: Boolean(data.user.email_confirmed_at),
+        };
       },
       calendarOAuth: google.oauth,
       oauthState: createOAuthStateSigner(env.OAUTH_STATE_SECRET ?? env.SUPABASE_SERVICE_KEY),

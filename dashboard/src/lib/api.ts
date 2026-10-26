@@ -25,6 +25,8 @@ export interface Api {
   getAnalytics(days?: number): Promise<AnalyticsSummary>;
 
   startCalendarConnect(): Promise<string>;
+  /** Exchange the OAuth code+state after Google redirects back to the dashboard. */
+  completeCalendarConnect(code: string, state: string): Promise<void>;
   disconnectCalendar(): Promise<void>;
 }
 
@@ -89,6 +91,7 @@ const httpApi: Api = {
   getAnalytics: (days = 30) => request(`/analytics/summary?days=${days}`),
 
   startCalendarConnect: async () => (await request<{ url: string }>("/auth/google/start")).url,
+  completeCalendarConnect: (code, state) => request("/auth/google/complete", json("POST", { code, state })),
   disconnectCalendar: () => request("/auth/google", json("DELETE")),
 };
 

@@ -415,14 +415,34 @@ export default function Settings() {
   const preview = useAsync(() => (showPrompt ? api.getPromptPreview() : Promise.resolve(null)), [showPrompt]);
   const zones = useMemo(() => allTimeZones(), []);
 
-  // Result of the Google OAuth redirect.
+  // Google redirects the browser back here (GOOGLE_REDIRECT_URI points at the
+  // dashboard). Finish the connection with the owner's session, so the grant is
+  // bound to the authenticated user and business, then strip the query.
+  const oauthError = params.get("error");
+  const oauthCode = params.get("code");
+  const oauthState = params.get("state");
   useEffect(() => {
-    const status = params.get("google_calendar");
-    if (!status) return;
-    if (status === "connected") toast("Google Calendar connected");
-    else toast(`Google Calendar connection failed (${params.get("google_calendar_detail") ?? "unknown"})`, "error");
-    setParams({ tab: "integrations" }, { replace: true });
-  }, [params, setParams, toast]);
+    if (!oauthCode && !oauthError) return;
+    const clear = () => setParams({ tab: "integrations" }, { replace: true });
+    if (oauthError || !oauthCode || !oauthState) {
+      toast(`Google Calendar connection failed (${oauthError ?? "missing_code"})`, "error");
+      clear();
+      return;
+    }
+    let active = true;
+    api
+      .completeCalendarConnect(oauthCode, oauthState)
+      .then(async () => {
+        if (!active) return;
+        toast("Google Calendar connected");
+        setBusiness(await api.getBusiness());
+      })
+      .catch((err: unknown) => active && toast(`Google Calendar connection failed (${(err as Error).message})`, "error"))
+      .finally(clear);
+    return () => {
+      active = false;
+    };
+  }, [oauthCode, oauthState, oauthError, setParams, setBusiness, toast]);
 
   if (error) return <ErrorState error={error} />;
   if (loading || !business) return <Skeleton className="h-96 rounded-xl" />;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { normalizeEmail } from "../domain/email";
 import type { Appointment, Business, CallRecord, FaqItem, Message } from "../domain/types";
 import type { Repository } from "./repository";
 
@@ -50,8 +51,10 @@ export function createMemoryRepository(seed: Partial<MemoryState> = {}) {
     async findBusinessIdForUser(user) {
       const owned = state.businesses.find((b) => b.owner_user_id === user.id);
       if (owned) return owned.id;
+      if (!user.email || !user.emailVerified) return null;
+      const email = normalizeEmail(user.email);
       const unclaimed = state.businesses.find(
-        (b) => !b.owner_user_id && user.email && b.owner_email?.toLowerCase() === user.email.toLowerCase(),
+        (b) => !b.owner_user_id && b.owner_email && normalizeEmail(b.owner_email) === email,
       );
       if (!unclaimed) return null;
       unclaimed.owner_user_id = user.id;

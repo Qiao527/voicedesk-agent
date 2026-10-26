@@ -162,6 +162,8 @@ describe("tool-calls", () => {
 
     expect((await book(`${wednesday}T10:00:00`)).body.results[0].result).toMatch(/no longer available/);
     expect((await book(`${wednesday}T18:00:00`)).body.results[0].result).toMatch(/outside opening hours/);
+    // Beyond the 90-day horizon, which book_appointment now enforces too.
+    expect((await book("2027-06-01T10:00:00")).body.results[0].result).toMatch(/at most 90 days/);
     expect((await book("2026-10-20T10:30:00")).body.results[0].result).toMatch(/too soon/);
     expect(state.appointments).toHaveLength(0);
   });

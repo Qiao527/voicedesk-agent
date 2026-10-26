@@ -137,6 +137,9 @@ export function createDemoApi(now = new Date()): Api {
     startCalendarConnect: async () => {
       throw new Error("Google Calendar is not available in the demo.");
     },
+    completeCalendarConnect: async () => {
+      throw new Error("Google Calendar is not available in the demo.");
+    },
     disconnectCalendar: async () => {
       business = { ...business, google_calendar_connected_at: null };
     },

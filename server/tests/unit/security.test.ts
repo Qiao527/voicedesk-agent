@@ -68,7 +68,7 @@ describe("oauth state", () => {
 });
 
 describe("loadEnv", () => {
-  const base = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_KEY: "k" };
+  const base = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_KEY: "k", VAPI_WEBHOOK_SECRET: "s" };
 
   it("applies defaults", () => {
     const env = loadEnv(base);
@@ -77,9 +77,17 @@ describe("loadEnv", () => {
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("refuses to run unauthenticated webhooks in production", () => {
-    expect(() => loadEnv({ ...base, NODE_ENV: "production" })).toThrow(ConfigError);
-    expect(() => loadEnv({ ...base, NODE_ENV: "production", VAPI_WEBHOOK_SECRET: "s" })).not.toThrow();
+  it("fails closed on a missing webhook secret in every environment", () => {
+    const noSecret = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_KEY: "k" };
+    // Default (development) and production both refuse to boot without a secret.
+    expect(() => loadEnv(noSecret)).toThrow(/VAPI_WEBHOOK_SECRET/);
+    expect(() => loadEnv({ ...noSecret, NODE_ENV: "production" })).toThrow(ConfigError);
+    // Local development can opt out explicitly; production cannot.
+    expect(loadEnv({ ...noSecret, ALLOW_UNAUTHENTICATED_WEBHOOKS: "true" }).VAPI_WEBHOOK_SECRET).toBeUndefined();
+    expect(() => loadEnv({ ...noSecret, NODE_ENV: "production", ALLOW_UNAUTHENTICATED_WEBHOOKS: "true" })).toThrow(
+      /ALLOW_UNAUTHENTICATED_WEBHOOKS/,
+    );
+    expect(() => loadEnv({ ...noSecret, NODE_ENV: "production", VAPI_WEBHOOK_SECRET: "s" })).not.toThrow();
   });
 
   it("requires token encryption when calendar is enabled in production", () => {

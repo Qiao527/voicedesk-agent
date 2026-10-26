@@ -194,34 +194,48 @@ describe("Google Calendar OAuth", () => {
     connect: vi.fn(async () => {}),
   });
 
-  it("issues a signed URL and accepts a matching callback", async () => {
+  it("issues a signed URL and completes the flow for the owner who started it", async () => {
     const calendarOAuth = oauth();
     const { app, oauthState } = buildTestApp({ calendarOAuth });
     const start = await authed(app).get("/api/auth/google/start").expect(200);
     const state = new URL(start.body.url).searchParams.get("state")!;
     expect(oauthState.verify(state)).toBeTruthy();
 
-    const cb = await request(app).get(`/api/auth/google/callback?code=abc&state=${state}`).expect(302);
-    expect(cb.headers.location).toBe("http://localhost:5173/settings?google_calendar=connected");
+    const done = await authed(app).post("/api/auth/google/complete", { code: "abc", state }).expect(200);
+    expect(done.body).toEqual({ ok: true });
     expect(calendarOAuth.connect).toHaveBeenCalledWith(demoBusiness().id, "abc");
   });
 
-  it("rejects forged state and states for a business the user doesn't own", async () => {
+  it("requires a session and rejects completion by another user or with a forged state", async () => {
     const calendarOAuth = oauth();
     const { app, oauthState } = buildTestApp({ calendarOAuth });
+    const state = oauthState.sign({ businessId: demoBusiness().id, userId: OWNER.id });
 
-    const forged = await request(app).get("/api/auth/google/callback?code=abc&state=forged.sig").expect(302);
-    expect(forged.headers.location).toMatch(/invalid_state/);
+    // No bearer token at all: the completion endpoint is authenticated now.
+    await request(app).post("/api/auth/google/complete").send({ code: "abc", state }).expect(401);
 
+    // A different signed-in user cannot complete the owner's flow.
+    await request(app)
+      .post("/api/auth/google/complete")
+      .set("Authorization", "Bearer stranger")
+      .send({ code: "abc", state })
+      .expect(403);
+
+    // Forged state, and a state whose uid is not the caller, are both rejected.
+    await authed(app).post("/api/auth/google/complete", { code: "abc", state: "forged.sig" }).expect(400);
     const wrongUser = oauthState.sign({ businessId: demoBusiness().id, userId: "someone-else" });
-    const res = await request(app).get(`/api/auth/google/callback?code=abc&state=${wrongUser}`).expect(302);
-    expect(res.headers.location).toMatch(/business_mismatch/);
+    const res = await authed(app).post("/api/auth/google/complete", { code: "abc", state: wrongUser }).expect(400);
+    expect(res.body.error).toBe("invalid_state");
     expect(calendarOAuth.connect).not.toHaveBeenCalled();
+
+    // The public GET callback no longer exists (404 behind the authenticated router).
+    await authed(app).get("/api/auth/google/callback?code=abc&state=x").expect(404);
   });
 
   it("reports when calendar is not configured", async () => {
     const { app } = buildTestApp();
     await authed(app).get("/api/auth/google/start").expect(503);
+    await authed(app).post("/api/auth/google/complete", { code: "a", state: "b" }).expect(503);
   });
 });
 
