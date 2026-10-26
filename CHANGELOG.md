@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 (2026-10-25)
+## 1.0.0 (2026-10-26)
 
 First public release.
 
@@ -32,6 +32,7 @@ First public release.
 - 105 server tests and 11 dashboard tests; CI on Node 22 and 24.
 - Migration 003 and a corrected `schema.sql`.
 - Dockerfile, Railway and Vercel configs.
+- CodeQL scanning, tag-driven releases, Dependabot, CODEOWNERS, issue and pull request templates.
 
 ### Fixed
 - Weekday lookup for zones more than 12 hours ahead of UTC.

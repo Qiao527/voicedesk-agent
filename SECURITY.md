@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please don't open a public issue for security problems. Use GitHub's [private vulnerability reporting](https://github.com/Qiao527/voicedesk-ai/security/advisories/new) instead. Include the affected component, steps to reproduce, and the impact you expect.
+Please don't open a public issue for security problems. Use GitHub's [private vulnerability reporting](https://github.com/Qiao527/voicedesk-agent/security/advisories/new) instead. Include the affected component, steps to reproduce, and the impact you expect.
 
 You should get an acknowledgement within three business days.
 

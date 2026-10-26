@@ -22,7 +22,7 @@ cd server    && npm run lint && npm run typecheck && npm test
 cd dashboard && npm run lint && npm test && npm run build
 ```
 
-CI runs the same checks on Node 22 and 24.
+CI runs the same checks on Node 22 and 24, and CodeQL scans every pull request. Use the pull request template checklist.
 
 ## Guidelines
 

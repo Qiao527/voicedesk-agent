@@ -1,0 +1,42 @@
+name: Bug report
+description: Something isn't working as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please don't include real caller phone numbers, transcripts or API keys.
+        For security issues, use [private vulnerability reporting](https://github.com/Qiao527/voicedesk-agent/security/advisories/new) instead.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options: [Server (webhooks / call handling), Server (dashboard API), Dashboard, Database schema / migrations, Documentation]
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: If possible, reproduce with `npm run demo:call` or `npm run dev:demo`.
+      placeholder: |
+        1. ...
+        2. ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Server logs are JSON lines; paste the relevant events. Phone numbers are already masked.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v1.0.0 or a commit SHA
