@@ -1,71 +1,64 @@
-import { Request, Response, NextFunction } from "express";
-import crypto from "crypto";
-import { env } from "../config/env";
+import crypto from "node:crypto";
+import type { NextFunction, Request, Response } from "express";
+
+export type RequestWithRawBody = Request & { rawBody?: Buffer };
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
 
 /**
- * Middleware to verify Vapi webhook requests.
+ * Authenticate Vapi webhooks. Accepts any of the credential styles Vapi can
+ * be configured to send:
  *
- * Supports two modes:
- * 1. Shared secret header: Vapi sends a static secret in `x-vapi-secret`,
- *    configured via Vapi Org Settings → HTTP Headers. Compared in constant
- *    time to prevent timing attacks.
- * 2. HMAC-SHA256 signature: if Vapi ever supports body signing, the
- *    `x-vapi-signature` header is verified against the raw request body.
+ * 1. `X-Vapi-Secret: <secret>` (legacy inline secret / Bearer credential
+ *    with a custom header name)
+ * 2. `Authorization: Bearer <secret>` (Bearer Token custom credential)
+ * 3. `X-Vapi-Signature: <hex hmac-sha256 of raw body>` (HMAC credential)
  *
- * In development (no secret configured), this middleware is a no-op.
+ * Comparisons are constant-time. With no secret configured (local dev only;
+ * production refuses to boot without one) the check is skipped.
  */
-export function verifyVapiSignature(req: Request, res: Response, next: NextFunction) {
-  const secret = env.VAPI_WEBHOOK_SECRET;
-
-  if (!secret) {
-    next();
-    return;
-  }
-
-  // Mode 1: static shared secret header (Vapi HTTP Headers config)
-  const sharedSecret = req.headers["x-vapi-secret"];
-  if (sharedSecret && typeof sharedSecret === "string") {
-    const a = Buffer.from(sharedSecret);
-    const b = Buffer.from(secret);
-    if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
+export function createVerifyVapiRequest(secret: string | undefined) {
+  return function verifyVapiRequest(req: Request, res: Response, next: NextFunction) {
+    if (!secret) {
       next();
       return;
     }
-    res.status(401).json({ error: "Invalid webhook secret" });
-    return;
-  }
 
-  // Mode 2: HMAC-SHA256 body signature
-  const signature = req.headers["x-vapi-signature"];
-  if (signature && typeof signature === "string") {
-    const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
-    if (!rawBody) {
-      res.status(401).json({ error: "Missing raw body for signature verification" });
+    const shared = req.get("x-vapi-secret");
+    if (shared !== undefined) {
+      if (safeEqual(shared, secret)) return next();
+      res.status(401).json({ error: "Invalid webhook secret" });
       return;
     }
 
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(rawBody)
-      .digest("hex");
-
-    let valid = false;
-    try {
-      const sigBuf = Buffer.from(signature);
-      const expBuf = Buffer.from(expected);
-      valid = sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
-    } catch {
-      valid = false;
-    }
-
-    if (valid) {
-      next();
+    const auth = req.get("authorization");
+    if (auth?.toLowerCase().startsWith("bearer ")) {
+      if (safeEqual(auth.slice(7).trim(), secret)) return next();
+      res.status(401).json({ error: "Invalid webhook token" });
       return;
     }
-    res.status(401).json({ error: "Invalid webhook signature" });
-    return;
-  }
 
-  // No recognized auth header present
-  res.status(401).json({ error: "Missing webhook authentication" });
+    const signature = req.get("x-vapi-signature");
+    if (signature !== undefined) {
+      const raw = (req as RequestWithRawBody).rawBody;
+      if (!raw) {
+        res.status(401).json({ error: "Missing body for signature verification" });
+        return;
+      }
+      const expected = crypto.createHmac("sha256", secret).update(raw).digest("hex");
+      const provided = signature
+        .replace(/^sha256=/i, "")
+        .trim()
+        .toLowerCase();
+      if (safeEqual(provided, expected)) return next();
+      res.status(401).json({ error: "Invalid webhook signature" });
+      return;
+    }
+
+    res.status(401).json({ error: "Missing webhook authentication" });
+  };
 }

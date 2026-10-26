@@ -1,19 +1,21 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2023",
     "module": "commonjs",
-    "lib": ["ES2022"],
-    "outDir": "./dist",
-    "rootDir": "./src",
+    "lib": ["ES2023"],
+    "types": ["node"],
     "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true
+    "isolatedModules": true,
+    "sourceMap": true,
+    "outDir": "./dist"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "tests/**/*", "vitest.config.mts"],
   "exclude": ["node_modules", "dist"]
 }

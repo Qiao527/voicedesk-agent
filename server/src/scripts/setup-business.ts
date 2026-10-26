@@ -1,39 +1,19 @@
 /**
- * CLI script to onboard a new business.
+ * Onboard a new business: collect details, optionally buy a Vapi number
+ * pointed at this server, create the Supabase row and seed starter FAQs.
  *
- * Usage:
- *   npx ts-node src/scripts/setup-business.ts
- *
- * What it does:
- *   1. Prompts for business details (name, owner, hours, etc.)
- *   2. Buys a Vapi phone number pointed at our webhook
- *   3. Creates the business record in Supabase
- *   4. Optionally seeds some FAQ items
- *   5. Prints a summary with the phone number to give to the client
+ *   npm run setup
  */
-
 import "dotenv/config";
-import "../config/env";
-import * as readline from "readline";
-import { supabase } from "../services/supabase";
-import { buyPhoneNumber } from "../services/vapi";
-import { normalizeE164 } from "../services/phone";
+import { createClient } from "@supabase/supabase-js";
+import { stdin as input, stdout as output } from "node:process";
+import * as readline from "node:readline/promises";
+import { normalizeE164 } from "../domain/phone";
+import { isValidTimeZone, parseHoursRange } from "../domain/time";
+import { WEEKDAYS, type BusinessHours } from "../domain/types";
+import { createVapiClient } from "../services/vapi-client";
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-function ask(question: string, defaultValue?: string): Promise<string> {
-  const suffix = defaultValue ? ` [${defaultValue}]` : "";
-  return new Promise((resolve) => {
-    rl.question(`${question}${suffix}: `, (answer) => {
-      resolve(answer.trim() || defaultValue || "");
-    });
-  });
-}
-
-const DEFAULT_HOURS = {
+const DEFAULT_HOURS: BusinessHours = {
   mon: "9:00-17:00",
   tue: "9:00-17:00",
   wed: "9:00-17:00",
@@ -43,89 +23,75 @@ const DEFAULT_HOURS = {
   sun: "closed",
 };
 
-const SAMPLE_FAQS = [
-  {
-    question: "What are your business hours?",
-    answer: "We're open Monday through Friday, 9am to 5pm. We're closed on weekends.",
-    category: "hours",
-  },
-  {
-    question: "Where are you located?",
-    answer: "",
-    category: "location",
-  },
-  {
-    question: "Do you accept walk-ins?",
-    answer: "We prefer appointments, but we do accept walk-ins when availability allows.",
-    category: "services",
-  },
-];
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`Missing ${name}. Copy .env.example to .env and fill it in.`);
+    process.exit(1);
+  }
+  return value;
+}
 
 async function main() {
-  console.log("\n─── VoiceDesk AI — New Business Setup ───\n");
+  const db = createClient(required("SUPABASE_URL"), required("SUPABASE_SERVICE_KEY"), {
+    auth: { persistSession: false },
+  });
+  const rl = readline.createInterface({ input, output });
+  const ask = async (question: string, fallback = "") => {
+    const answer = (await rl.question(`${question}${fallback ? ` [${fallback}]` : ""}: `)).trim();
+    return answer || fallback;
+  };
 
-  // 1. Collect business info
+  console.log("\nVoiceDesk · new business setup\n");
+
   const name = await ask("Business name");
-  if (!name) {
-    console.error("Business name is required.");
-    process.exit(1);
-  }
+  if (!name) throw new Error("Business name is required");
 
   const ownerName = await ask("Owner name");
-  const ownerPhoneRaw = await ask(
-    "Owner phone (for SMS notifications AND live call transfer, e.g. +16175551234)",
-  );
+  const ownerPhoneRaw = await ask("Owner mobile (SMS alerts + live transfer), e.g. +16175551234");
   const ownerPhone = ownerPhoneRaw ? normalizeE164(ownerPhoneRaw) : null;
-  if (ownerPhoneRaw && !ownerPhone) {
-    console.error(
-      `"${ownerPhoneRaw}" could not be normalized to E.164. Use +<country><number>, e.g. +16175551234.`,
+  if (ownerPhoneRaw && !ownerPhone) throw new Error(`"${ownerPhoneRaw}" is not a valid phone number`);
+
+  const ownerEmail = await ask("Owner email (used to sign in to the dashboard)");
+  const address = await ask("Street address");
+
+  const timezone = await ask("Time zone", "America/New_York");
+  if (!isValidTimeZone(timezone)) throw new Error(`Unknown time zone "${timezone}"`);
+
+  const hours: BusinessHours = { ...DEFAULT_HOURS };
+  if ((await ask("Use Mon-Fri 9:00-17:00? (y/n)", "y")).toLowerCase() === "n") {
+    for (const day of WEEKDAYS) {
+      const value = await ask(`  ${day} (HH:MM-HH:MM or closed)`, DEFAULT_HOURS[day]);
+      if (value !== "closed" && !parseHoursRange(value)) throw new Error(`Invalid hours "${value}"`);
+      hours[day] = value;
+    }
+  }
+
+  const duration = Number(await ask("Default appointment length in minutes", "30"));
+  const greeting = await ask("Greeting", `Thanks for calling ${name}, how can I help you today?`);
+
+  let vapiPhone: { id: string; number: string } | null = null;
+  const vapiKey = process.env.VAPI_API_KEY;
+  if (vapiKey && (await ask("Buy a Vapi phone number now? (y/n)", "y")).toLowerCase() === "y") {
+    const serverUrl = await ask(
+      "Public webhook URL",
+      process.env.PUBLIC_SERVER_URL ? `${process.env.PUBLIC_SERVER_URL}/webhooks/vapi` : "",
     );
-    process.exit(1);
-  }
-  const ownerEmail = await ask("Owner email");
-  const address = await ask("Business address");
-  const timezone = await ask("Timezone", "America/New_York");
-
-  const customHours = await ask("Use default hours Mon-Fri 9-5? (y/n)", "y");
-  const businessHours =
-    customHours.toLowerCase() === "n"
-      ? JSON.parse(await ask("Enter hours as JSON"))
-      : DEFAULT_HOURS;
-
-  const greeting = await ask(
-    "Custom greeting",
-    `Hello! Thanks for calling ${name}. How can I help you today?`,
-  );
-
-  const plan = await ask("Plan (starter/pro)", "starter");
-  const areaCode = await ask("Preferred area code for phone number", "617");
-
-  // 2. Determine webhook URL
-  const webhookUrl = await ask(
-    "Webhook URL (your public server URL + /webhooks/vapi)",
-    "https://your-server.com/webhooks/vapi",
-  );
-
-  console.log("\n─── Setting up... ───\n");
-
-  // 3. Buy a Vapi phone number
-  console.log("Buying Vapi phone number...");
-  let vapiPhone;
-  try {
-    vapiPhone = await buyPhoneNumber({
-      areaCode,
-      serverUrl: webhookUrl,
-    });
-    console.log(`  Phone number: ${vapiPhone.number}`);
-    console.log(`  Vapi phone ID: ${vapiPhone.id}`);
-  } catch (err) {
-    console.error("Failed to buy phone number:", err);
-    console.log("Continuing without phone number — you can add one manually later.\n");
+    const areaCode = await ask("Preferred area code", "617");
+    try {
+      vapiPhone = await createVapiClient(vapiKey).buyPhoneNumber({
+        areaCode,
+        serverUrl,
+        secret: process.env.VAPI_WEBHOOK_SECRET,
+        name: name.slice(0, 40),
+      });
+      console.log(`  Bought ${vapiPhone.number}`);
+    } catch (err) {
+      console.warn(`  Could not buy a number (${(err as Error).message}). Add one later in Vapi.`);
+    }
   }
 
-  // 4. Create business in Supabase
-  console.log("Creating business record in Supabase...");
-  const { data: business, error } = await supabase
+  const { data: business, error } = await db
     .from("businesses")
     .insert({
       name,
@@ -133,71 +99,39 @@ async function main() {
       owner_phone: ownerPhone,
       owner_email: ownerEmail || null,
       address: address || null,
-      vapi_phone_number: vapiPhone?.number || null,
-      vapi_phone_id: vapiPhone?.id || null,
-      calendar_id: "primary",
+      vapi_phone_number: vapiPhone?.number ?? null,
+      vapi_phone_id: vapiPhone?.id ?? null,
       timezone,
-      business_hours: businessHours,
+      business_hours: hours,
       greeting_message: greeting,
-      voice_provider: "11labs",
-      voice_id: "paula",
-      plan,
-      monthly_fee: plan === "pro" ? 40000 : 25000,
+      appointment_duration_min: Number.isFinite(duration) && duration >= 10 ? duration : 30,
       status: "active",
     })
-    .select()
+    .select("id")
     .single();
+  if (error) throw new Error(`Could not create business: ${error.message}`);
 
-  if (error) {
-    console.error("Failed to create business:", error.message);
-    process.exit(1);
+  if ((await ask("Seed starter FAQs? (y/n)", "y")).toLowerCase() === "y") {
+    const faqs = [
+      { question: "What are your hours?", answer: "Please see our opening hours.", category: "hours" },
+      ...(address
+        ? [{ question: "Where are you located?", answer: `We're at ${address}.`, category: "location" }]
+        : []),
+    ].map((f, i) => ({ ...f, business_id: business.id, sort_order: i }));
+    const { error: faqError } = await db.from("faq_items").insert(faqs);
+    if (faqError) console.warn(`  FAQ seed failed: ${faqError.message}`);
   }
-
-  console.log(`  Business ID: ${business.id}`);
-
-  // 5. Seed FAQ items
-  const seedFaqs = await ask("Seed sample FAQ items? (y/n)", "y");
-  if (seedFaqs.toLowerCase() === "y") {
-    const faqs = SAMPLE_FAQS.map((faq, i) => ({
-      business_id: business.id,
-      question: faq.question,
-      answer:
-        faq.category === "location" && address
-          ? `We're located at ${address}.`
-          : faq.answer,
-      category: faq.category,
-      sort_order: i,
-    }));
-
-    const { error: faqError } = await supabase.from("faq_items").insert(faqs);
-    if (faqError) {
-      console.error("Warning: failed to seed FAQs:", faqError.message);
-    } else {
-      console.log(`  Seeded ${faqs.length} FAQ items`);
-    }
-  }
-
-  // 6. Print summary
-  console.log("\n─── Setup Complete ───\n");
-  console.log(`  Business:    ${name}`);
-  console.log(`  Business ID: ${business.id}`);
-  if (vapiPhone) {
-    console.log(`  Phone:       ${vapiPhone.number}`);
-    console.log(`  Vapi ID:     ${vapiPhone.id}`);
-  }
-  console.log(`  Webhook:     ${webhookUrl}`);
-  console.log(`  Plan:        ${plan} ($${plan === "pro" ? 400 : 250}/mo)`);
-  console.log(`  Timezone:    ${timezone}`);
-  console.log();
-  if (vapiPhone) {
-    console.log(`  Call ${vapiPhone.number} to test the AI receptionist.`);
-  }
-  console.log();
 
   rl.close();
+  console.log(`
+Done.
+  Business id : ${business.id}
+  Phone       : ${vapiPhone?.number ?? "(not provisioned)"}
+  Dashboard   : sign up with ${ownerEmail || "the owner email"} to claim this business
+`);
 }
 
 main().catch((err) => {
-  console.error("Setup failed:", err);
+  console.error(`Setup failed: ${err instanceof Error ? err.message : err}`);
   process.exit(1);
 });
