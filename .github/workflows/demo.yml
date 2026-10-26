@@ -19,6 +19,8 @@ concurrency:
 
 jobs:
   build:
+    # GitHub Pages needs a public repo on the free plan; skip quietly until then.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     defaults:
       run:
