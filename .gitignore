@@ -1,6 +1,12 @@
 node_modules/
 dist/
-.env
-.env.local
+coverage/
+*.tsbuildinfo
 *.log
 .DS_Store
+
+# Environment files: keep examples and the committed demo-mode config.
+.env
+.env.*
+!.env.example
+!.env.demo
