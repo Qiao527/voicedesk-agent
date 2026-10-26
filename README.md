@@ -132,6 +132,8 @@ Vapi handles the phone line, speech-to-text and text-to-speech. On each call the
 | Quality | Vitest, Supertest, Testing Library, ESLint 9, Prettier, GitHub Actions, Dependabot |
 | Deploy | Docker, Railway (server), Vercel or GitHub Pages (dashboard) |
 
+> Why a managed voice platform (Vapi) and not a self-hosted LiveKit stack — with the cost, latency and compliance trade-offs and the point at which that flips: [ADR 6](docs/decisions/0006-voice-platform-livekit-vs-vapi.md).
+
 ## Running it for real
 
 You'll need a Supabase project and a Vapi account. Google Calendar, Anthropic, Twilio and Resend are optional; each feature turns on when its keys are present.
