@@ -36,8 +36,16 @@ jobs:
       - run: npm run build:demo
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
-      # SPA fallback: GitHub Pages serves 404.html for unknown paths.
-      - run: cp dist/index.html dist/404.html
+      # GitHub Pages serves /calls from calls.html, so each app route gets a
+      # copy of the shell and deep links return 200 instead of a 404 fallback.
+      # Keep this list in sync with the routes in dashboard/src/App.tsx.
+      # Unknown paths still get 404.html, which renders the app's 404 page.
+      - name: Add static entry points for client-side routes
+        run: |
+          for route in calls messages appointments settings login; do
+            cp dist/index.html "dist/$route.html"
+          done
+          cp dist/index.html dist/404.html
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dashboard/dist
