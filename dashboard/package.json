@@ -1,5 +1,5 @@
 {
-  "name": "voicedesk-ai-dashboard",
+  "name": "voicedesk-dashboard",
   "version": "1.0.0",
   "description": "Owner dashboard for VoiceDesk AI.",
   "author": "Zaiqiao Long (https://github.com/Qiao527)",
@@ -52,5 +52,14 @@
     "typescript-eslint": "^8.72.0",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Qiao527/voicedesk-agent.git",
+    "directory": "dashboard"
+  },
+  "homepage": "https://github.com/Qiao527/voicedesk-agent#readme",
+  "bugs": {
+    "url": "https://github.com/Qiao527/voicedesk-agent/issues"
   }
 }

@@ -8,16 +8,20 @@
 It answers every call, books appointments into Google Calendar, answers questions from your FAQ,
 takes messages, and texts the owner a summary the moment the caller hangs up.
 
-[![CI](https://github.com/Qiao527/voicedesk-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Qiao527/voicedesk-ai/actions/workflows/ci.yml)
+[![CI](https://github.com/Qiao527/voicedesk-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Qiao527/voicedesk-agent/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Qiao527/voicedesk-agent/actions/workflows/codeql.yml/badge.svg)](https://github.com/Qiao527/voicedesk-agent/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/Qiao527/voicedesk-agent?color=4f46e5)](https://github.com/Qiao527/voicedesk-agent/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4f46e5.svg)](LICENSE)
 ![Node 22+](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
 
-[**Live demo**](https://qiao527.github.io/voicedesk-ai/) · [Architecture](docs/architecture.md) · [Deploy](docs/deployment.md) · [Design decisions](docs/decisions)
+[**Live demo**](https://qiao527.github.io/voicedesk-agent/) · [Architecture](docs/architecture.md) · [Deploy](docs/deployment.md) · [Design decisions](docs/decisions)
 
 <img src="docs/images/overview.png" alt="VoiceDesk dashboard overview" width="100%" />
 
 </div>
+
+> **About the live demo:** it is the real dashboard running in demo mode on sample data for a fictional practice, so anyone can click through it without an account. The voice backend needs your own Vapi and Supabase accounts; see [Running it for real](#running-it-for-real).
 
 ## Why
 
@@ -50,8 +54,8 @@ Small appointment-driven practices miss a large share of their calls: the front 
 **Simulate a full call.** This boots the real webhook server with an in-memory database and calendar, then replays the messages Vapi sends during a booking call:
 
 ```bash
-git clone https://github.com/Qiao527/voicedesk-ai.git
-cd voicedesk-ai/server && npm ci && npm run demo:call
+git clone https://github.com/Qiao527/voicedesk-agent.git
+cd voicedesk-agent/server && npm ci && npm run demo:call
 ```
 
 ```text
@@ -144,7 +148,7 @@ Point the Vapi number's server URL at `https://<your-server>/webhooks/vapi` (use
 ## Project structure
 
 ```
-voicedesk-ai/
+voicedesk-agent/
 ├── server/
 │   ├── src/
 │   │   ├── domain/          time zones, slot math, outcomes, digests, analytics (pure)
@@ -182,6 +186,8 @@ cd dashboard && npm test       # transcript parsing, formatting, demo data, comp
 
 ## Author
 
-Designed and built by **Zaiqiao Long** ([@Qiao527](https://github.com/Qiao527)). The first version was deployed in April 2026 and verified with live phone calls; this release rebuilds it as a production-grade open-source project.
+VoiceDesk is designed, built and maintained by **Zaiqiao Long** ([@Qiao527](https://github.com/Qiao527)): product scope, system architecture, voice and prompt design, the server, the dashboard and its visual design, and the documentation.
+
+The first version was deployed in April 2026 and verified end to end with live phone calls. Version 1.0 rebuilds it as a production-grade open-source project; the commit history shows that progression.
 
 Licensed under the [MIT License](LICENSE).

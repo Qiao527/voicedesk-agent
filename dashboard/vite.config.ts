@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  // Set BASE_PATH=/voicedesk-ai/ when hosting under a sub-path (GitHub Pages).
+  // Set BASE_PATH=/voicedesk-agent/ when hosting under a sub-path (GitHub Pages).
   base: process.env.BASE_PATH ?? "/",
   plugins: [react(), tailwindcss()],
   server: {

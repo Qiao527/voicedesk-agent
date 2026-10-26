@@ -13,5 +13,5 @@ export const API_BASE = env.VITE_API_URL ? `${String(env.VITE_API_URL).replace(/
 export const SUPABASE_URL = env.VITE_SUPABASE_URL as string | undefined;
 export const SUPABASE_ANON_KEY = env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-export const REPO_URL = "https://github.com/Qiao527/voicedesk-ai";
+export const REPO_URL = "https://github.com/Qiao527/voicedesk-agent";
 export const AUTHOR = { name: "Zaiqiao Long", url: "https://github.com/Qiao527" };

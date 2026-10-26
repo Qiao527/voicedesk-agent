@@ -1,5 +1,5 @@
 {
-  "name": "voicedesk-ai-server",
+  "name": "voicedesk-server",
   "version": "1.0.0",
   "description": "Webhook server for VoiceDesk AI: Vapi call handling, Google Calendar booking, Claude post-call analysis.",
   "author": "Zaiqiao Long (https://github.com/Qiao527)",
@@ -49,5 +49,14 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.72.0",
     "vitest": "^5.0.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Qiao527/voicedesk-agent.git",
+    "directory": "server"
+  },
+  "homepage": "https://github.com/Qiao527/voicedesk-agent#readme",
+  "bugs": {
+    "url": "https://github.com/Qiao527/voicedesk-agent/issues"
   }
 }
